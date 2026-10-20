@@ -3,3 +3,5 @@
 collections:
   - name: community.general   # timezone, modprobe
   - name: ansible.posix       # sysctl
+  - name: kubernetes.core     # k8s, k8s_info (맥에서 클러스터에 적용, 파이썬 kubernetes 라이브러리 필요)
+  - name: ansible.mysql       # mysql_db, mysql_user (cp1에 python3-pymysql 필요)

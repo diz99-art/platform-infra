@@ -1,5 +1,12 @@
-# 비밀 값 (2단계 이후 MySQL 비밀번호 등)
+# 비밀 값
 .env
+# Ansible Vault 비밀번호 파일: 이게 있으면 vault.yml을 풀 수 있다. 절대 올리지 않는다.
+.vault-pass
+ansible/.vault-pass
+# 암호화 전 평문 vault 파일을 잠깐 만들 때 쓰는 이름
+*.plain.yml
+# 맥으로 가져온 MySQL 백업
+backups/
 *.secret.yaml
 kubeconfig*
 

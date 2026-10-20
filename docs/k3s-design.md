@@ -6,7 +6,7 @@
 ansible/
 ├── ansible.cfg            설정 (인벤토리 위치, 출력 형식)
 ├── inventory.ini          서버 목록과 그룹 (control_plane, workers, k3s_cluster)
-├── requirements.yml       필요한 컬렉션 (community.general, ansible.posix)
+├── requirements.yml       필요한 컬렉션 (community.general, ansible.posix, kubernetes.core, ansible.mysql)
 ├── group_vars/
 │   └── all.yml            모든 서버 공통 변수: k3s 버전, 서버 IP, kubeconfig 위치
 ├── site.yml               설치 플레이북: common → k3s_server → k3s_agent 순서

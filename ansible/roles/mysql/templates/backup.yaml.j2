@@ -1,0 +1,99 @@
+# 매일 mysqldump 백업. 결과는 {{ mysql_node }}의 {{ mysql_backup_path }}/<날짜-시각>/<DB>.sql.gz
+# 같은 노드 디스크에 있으므로 이것만으로는 노드가 망가지면 같이 잃는다 → scripts/fetch-mysql-backups.sh로 맥에 복사
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-backup
+  namespace: {{ mysql_namespace }}
+spec:
+  storageClassName: local-static
+  volumeName: mysql-backup
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ mysql_backup_size }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mysql-backup
+  namespace: {{ mysql_namespace }}
+spec:
+  schedule: "{{ mysql_backup_schedule }}"
+  timeZone: {{ mysql_backup_timezone }}
+  # 앞의 백업이 아직 돌고 있으면 새 백업을 시작하지 않는다
+  concurrencyPolicy: Forbid
+  # 클러스터가 꺼져 있다 켜졌을 때, 놓친 지 1시간 안이면 바로 실행
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2              # 실패하면 2번까지 다시 시도
+      activeDeadlineSeconds: 900   # 15분 넘게 걸리면 멈춤
+      template:
+        metadata:
+          labels:
+            app: mysql-backup
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsUser: {{ mysql_uid }}
+            runAsGroup: {{ mysql_uid }}
+            runAsNonRoot: true
+          containers:
+            - name: backup
+              image: {{ mysql_image }}      # 서버와 같은 버전의 mysqldump
+              env:
+                - name: MYSQL_HOST
+                  value: mysql.{{ mysql_namespace }}.svc.cluster.local
+                - name: BACKUP_USER
+                  value: {{ mysql_backup_user }}
+                - name: BACKUP_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: mysql-backup
+                      key: password
+                - name: DATABASES
+                  value: "{{ mysql_databases | join(' ') }}"
+                - name: RETENTION_DAYS
+                  value: "{{ mysql_backup_retention_days }}"
+                - name: TZ
+                  value: {{ mysql_backup_timezone }}
+              command: ["bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail          # 중간 명령이 실패하면 즉시 멈춤 (mysqldump 실패를 gzip이 덮지 않게)
+                  umask 077
+                  ts=$(date +%Y%m%d-%H%M%S)
+                  tmp="/backup/.tmp-$ts"
+                  mkdir -p "$tmp"
+                  # 비밀번호를 명령줄(-p...)에 쓰면 ps로 보인다 → 옵션 파일로 넘긴다
+                  printf '[client]\nuser=%s\npassword=%s\nhost=%s\n' "$BACKUP_USER" "$BACKUP_PASSWORD" "$MYSQL_HOST" > /tmp/backup.cnf
+                  for db in $DATABASES; do
+                    # --single-transaction: 잠그지 않고 한 시점의 일관된 스냅샷을 뜬다 (InnoDB)
+                    # --databases: 복구할 때 CREATE DATABASE와 USE가 같이 들어간다
+                    mysqldump --defaults-extra-file=/tmp/backup.cnf \
+                      --single-transaction --triggers --events --no-tablespaces --set-gtid-purged=OFF \
+                      --databases "$db" | gzip > "$tmp/$db.sql.gz"
+                  done
+                  # 다 끝난 뒤에 이름을 바꾼다 → 중간에 실패한 백업이 완성본처럼 보이지 않는다
+                  mv "$tmp" "/backup/$ts"
+                  # 보관 기간이 지난 백업과 실패해 남은 임시 폴더 지우기
+                  find /backup -mindepth 1 -maxdepth 1 -type d -name '20*' -mtime +"$RETENTION_DAYS" -print -exec rm -rf {} +
+                  find /backup -mindepth 1 -maxdepth 1 -type d -name '.tmp-*' -mmin +60 -print -exec rm -rf {} +
+                  echo "백업 완료: /backup/$ts"
+                  ls -l "/backup/$ts"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: mysql-backup

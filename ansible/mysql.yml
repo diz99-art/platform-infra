@@ -1,0 +1,33 @@
+# MySQL 배포 플레이북. 실행: cd ansible && ansible-playbook mysql.yml
+# 여러 번 실행해도 안전하다(멱등). 비밀번호는 group_vars/all/vault.yml(암호화)에서 읽는다.
+# 비밀번호 교체: vault 수정 후 ansible-playbook mysql.yml -e mysql_rotate_passwords=true
+
+- name: 1) 데이터 노드에 고정 경로 만들기
+  hosts: data
+  become: true
+  gather_facts: false
+  tasks:
+    - ansible.builtin.import_role:
+        name: mysql
+        tasks_from: storage
+
+- name: 2) 쿠버네티스에 Secret·MySQL·백업 배포 (맥에서 API 서버로)
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ kubeconfig_local_path }}"
+      context: "{{ kubeconfig_context }}"
+  tasks:
+    - ansible.builtin.import_role:
+        name: mysql
+        tasks_from: k8s
+
+- name: 3) 서비스별 DB와 계정
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  tasks:
+    - ansible.builtin.import_role:
+        name: mysql
+        tasks_from: schema

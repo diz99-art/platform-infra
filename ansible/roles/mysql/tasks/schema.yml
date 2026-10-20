@@ -1,0 +1,72 @@
+# [cp1에서] ansible.mysql 모듈(community.mysql의 후속)로 DB와 계정을 만든다.
+# 노드는 클러스터 안의 Service IP(ClusterIP)로 접속할 수 있다. MySQL을 클러스터 밖에 열 필요가 없다.
+
+- name: Ansible MySQL 모듈이 쓰는 파이썬 라이브러리
+  ansible.builtin.apt:
+    name: python3-pymysql
+    state: present
+
+- name: mysql Service의 ClusterIP 찾기
+  kubernetes.core.k8s_info:
+    kind: Service
+    name: mysql
+    namespace: "{{ mysql_namespace }}"
+    kubeconfig: "{{ kubeconfig_local_path }}"
+  delegate_to: localhost
+  become: false
+  register: mysql_svc
+
+- name: 접속 정보 변수
+  ansible.builtin.set_fact:
+    mysql_login:
+      login_host: "{{ mysql_svc.resources[0].spec.clusterIP }}"
+      login_user: root
+      login_password: "{{ mysql_root_password }}"
+  no_log: true
+
+- name: 서비스별 DB
+  ansible.mysql.mysql_db:
+    name: "{{ item }}"
+    encoding: utf8mb4
+    collation: utf8mb4_0900_ai_ci
+    login_host: "{{ mysql_login.login_host }}"
+    login_user: "{{ mysql_login.login_user }}"
+    login_password: "{{ mysql_login.login_password }}"
+  loop: "{{ mysql_databases }}"
+
+# 계정 이름 = DB 이름. 권한은 "자기DB.*" 하나뿐 → 다른 DB는 보이지도 않는다.
+# plugin: MySQL 8.4 기본 인증 방식(caching_sha2_password). 지정하지 않으면 모듈이 옛 방식(mysql_native_password)으로
+#   만들려다 "Plugin 'mysql_native_password' is not loaded" 오류가 난다 (8.4는 옛 방식이 기본으로 꺼져 있음)
+# update_password: on_create → 이미 있는 계정의 비밀번호는 건드리지 않는다
+#   (caching_sha2_password는 같은 비밀번호도 매번 다른 해시라 비교할 수 없어서, always면 매번 changed가 된다)
+- name: 서비스별 계정 (자기 DB에만 권한)
+  ansible.mysql.mysql_user:
+    name: "{{ item }}"
+    host: "%"
+    plugin: caching_sha2_password
+    plugin_auth_string: "{{ mysql_service_passwords[item] }}"
+    update_password: "{{ 'always' if mysql_rotate_passwords | bool else 'on_create' }}"
+    priv: "{{ item }}.*:{{ mysql_service_privileges }}"
+    resource_limits:
+      MAX_USER_CONNECTIONS: "{{ mysql_service_max_connections }}"
+    login_host: "{{ mysql_login.login_host }}"
+    login_user: "{{ mysql_login.login_user }}"
+    login_password: "{{ mysql_login.login_password }}"
+  loop: "{{ mysql_databases }}"
+  no_log: true
+
+- name: 백업 계정 (4개 DB 읽기 전용)
+  ansible.mysql.mysql_user:
+    name: "{{ mysql_backup_user }}"
+    host: "%"
+    plugin: caching_sha2_password
+    plugin_auth_string: "{{ mysql_backup_password }}"
+    update_password: "{{ 'always' if mysql_rotate_passwords | bool else 'on_create' }}"
+    # coupon.*:SELECT,.../auth.*:SELECT,... 형태로 이어 붙인다
+    priv: "{{ mysql_databases | product(['.*:' ~ mysql_backup_privileges]) | map('join') | join('/') }}"
+    resource_limits:
+      MAX_USER_CONNECTIONS: 2
+    login_host: "{{ mysql_login.login_host }}"
+    login_user: "{{ mysql_login.login_user }}"
+    login_password: "{{ mysql_login.login_password }}"
+  no_log: true

@@ -13,3 +13,10 @@ k3s_api_port: 6443
 # 맥에 저장할 kubeconfig (Docker Desktop 등 다른 클러스터 설정과 섞이지 않게 따로 둔다)
 kubeconfig_local_path: "{{ lookup('env', 'HOME') }}/.kube/platform-infra.yaml"
 kubeconfig_context: platform-infra
+
+# ── 비밀 값 ──
+# 실제 값은 같은 폴더의 vault.yml(암호화됨)에 vault_ 접두사로 있다.
+# 여기서는 "어떤 비밀이 있는지"만 보이도록 이름을 연결한다 (grep으로 찾기 쉽게 하는 관례).
+mysql_root_password: "{{ vault_mysql_root_password }}"
+mysql_backup_password: "{{ vault_mysql_backup_password }}"
+mysql_service_passwords: "{{ vault_mysql_service_passwords }}"

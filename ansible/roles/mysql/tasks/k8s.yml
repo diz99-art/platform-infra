@@ -1,0 +1,72 @@
+# [맥에서] kubernetes.core.k8s 모듈로 클러스터에 적용한다 (kubeconfig는 플레이의 module_defaults).
+# k8s 모듈은 "원하는 상태"와 클러스터의 현재 상태를 비교해서 다를 때만 changed → 멱등하다.
+
+- name: 네임스페이스
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ item }}"
+  loop:
+    - "{{ mysql_namespace }}"
+    - "{{ mysql_app_namespace }}"
+
+# Secret 값은 vault에서 풀린 변수로 만든다. 파일로 남지 않고 메모리에서 바로 API 서버로 간다.
+# data는 base64 (암호화가 아니라 단순 인코딩). stringData 대신 data를 쓰는 이유: 서버에 저장되는 형태와 같아서 비교가 정확(멱등)하다.
+- name: root·백업 계정 Secret ({{ mysql_namespace }} 네임스페이스)
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "{{ item.name }}"
+        namespace: "{{ mysql_namespace }}"
+      data:
+        username: "{{ item.user | b64encode }}"
+        password: "{{ item.password | b64encode }}"
+  loop:
+    - { name: mysql-root, user: root, password: "{{ mysql_root_password }}" }
+    - { name: mysql-backup, user: "{{ mysql_backup_user }}", password: "{{ mysql_backup_password }}" }
+  loop_control:
+    label: "{{ item.name }}"   # 출력에 비밀번호 대신 이름만
+  no_log: true
+
+# 앱이 그대로 env로 받아 쓸 수 있는 접속 정보 (Spring: SPRING_DATASOURCE_URL 등에 연결)
+- name: 서비스별 접속 정보 Secret ({{ mysql_app_namespace }} 네임스페이스)
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "mysql-{{ item }}"
+        namespace: "{{ mysql_app_namespace }}"
+      data:
+        username: "{{ item | b64encode }}"
+        password: "{{ mysql_service_passwords[item] | b64encode }}"
+        database: "{{ item | b64encode }}"
+        host: "{{ ('mysql.' ~ mysql_namespace ~ '.svc.cluster.local') | b64encode }}"
+        port: "{{ '3306' | b64encode }}"
+        jdbc-url: "{{ ('jdbc:mysql://mysql.' ~ mysql_namespace ~ '.svc.cluster.local:3306/' ~ item) | b64encode }}"
+  loop: "{{ mysql_databases }}"
+  no_log: true
+
+- name: 저장소 (StorageClass, 고정 경로 PV)
+  kubernetes.core.k8s:
+    template: storage.yaml.j2
+
+- name: MySQL 설정 (ConfigMap)
+  kubernetes.core.k8s:
+    template: config.yaml.j2
+
+- name: MySQL (Service, StatefulSet) 적용 후 Ready까지 대기
+  kubernetes.core.k8s:
+    template: mysql.yaml.j2
+    wait: true
+    wait_timeout: 300
+
+- name: 백업 (PVC, CronJob)
+  kubernetes.core.k8s:
+    template: backup.yaml.j2

@@ -1,0 +1,44 @@
+# MySQL 롤 기본값. 비밀번호는 group_vars/all/vault.yml(암호화)에 있다.
+
+mysql_image: mysql:8.4.11
+mysql_namespace: data
+# 앱이 쓸 접속 정보 Secret을 만들 네임스페이스 (Secret은 네임스페이스 밖에서 못 읽는다)
+mysql_app_namespace: apps
+
+# 데이터를 둘 노드 = 인벤토리 [data] 그룹의 첫 서버 (worker1)
+mysql_node: "{{ groups['data'][0] }}"
+
+# 노드의 고정 경로. k3s 폴더(/var/lib/rancher) 밖이라 k3s를 지우고 다시 깔아도 남는다.
+mysql_data_path: /srv/data/mysql
+mysql_backup_path: /srv/backup/mysql
+# 공식 이미지의 mysql 사용자 번호. 폴더 주인을 이 번호로 맞춰야 컨테이너가 쓸 수 있다.
+mysql_uid: 999
+# local PV는 용량을 강제하지 않는다 (표시용). 실제 한도는 VM 디스크(20GB).
+mysql_data_size: 5Gi
+mysql_backup_size: 2Gi
+
+# 컨테이너 자원. requests는 자리 예약, limits는 상한 (넘으면 OOMKilled)
+mysql_cpu_request: 250m
+mysql_memory_request: 512Mi
+mysql_memory_limit: 768Mi
+
+# my.cnf (작은 메모리용, docs/mysql.md에 이유)
+mysql_innodb_buffer_pool_size: 256M
+mysql_max_connections: 120
+
+# 서비스별 DB와 계정. 계정 이름 = DB 이름, 자기 DB에만 권한.
+mysql_databases: [coupon, auth, notification, file]
+# DROP, GRANT OPTION, 다른 DB 권한은 주지 않는다 (최소 권한)
+mysql_service_privileges: SELECT,INSERT,UPDATE,DELETE,CREATE,ALTER,INDEX,REFERENCES,CREATE TEMPORARY TABLES,LOCK TABLES
+mysql_service_max_connections: 25
+# 백업 계정: 읽기와 덤프에 필요한 것만
+mysql_backup_user: backup
+mysql_backup_privileges: SELECT,SHOW VIEW,TRIGGER,LOCK TABLES,EVENT
+
+# true로 실행하면 vault의 새 비밀번호로 계정 비밀번호를 바꾼다 (-e mysql_rotate_passwords=true)
+mysql_rotate_passwords: false
+
+# 백업 CronJob
+mysql_backup_schedule: "0 3 * * *"      # 매일 새벽 3시
+mysql_backup_timezone: Asia/Seoul
+mysql_backup_retention_days: 7

@@ -1,0 +1,31 @@
+# 앱처럼 Secret(mysql-<서비스>)에서 접속 정보를 받아 MySQL에 붙어보는 시험용 파드.
+#   띄우기: kubectl apply -f k8s/examples/mysql-client.yaml
+#   쓰기:   kubectl -n apps exec -it mysql-client-coupon -- sh -c 'mysql -h "$DB_HOST" -u "$DB_USER" "$DB_NAME"'
+#   정리:   kubectl delete -f k8s/examples/mysql-client.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mysql-client-coupon
+  namespace: apps
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsUser: 999
+    runAsNonRoot: true
+  containers:
+    - name: client
+      image: mysql:8.4.11
+      command: ["sleep", "3600"]
+      env:
+        # 앱 Deployment에서도 이렇게 Secret의 키를 환경변수로 연결한다 (값은 매니페스트에 없다)
+        - name: DB_HOST
+          valueFrom: { secretKeyRef: { name: mysql-coupon, key: host } }
+        - name: DB_NAME
+          valueFrom: { secretKeyRef: { name: mysql-coupon, key: database } }
+        - name: DB_USER
+          valueFrom: { secretKeyRef: { name: mysql-coupon, key: username } }
+        - name: MYSQL_PWD          # mysql 클라이언트가 읽는 비밀번호 환경변수
+          valueFrom: { secretKeyRef: { name: mysql-coupon, key: password } }
+      resources:
+        requests: { cpu: 10m, memory: 32Mi }
+        limits: { memory: 128Mi }

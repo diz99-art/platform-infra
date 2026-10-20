@@ -1,0 +1,37 @@
+# MySQL 설정 파일(my.cnf). 공식 이미지는 /etc/mysql/conf.d/*.cnf 를 읽는다.
+# 메모리 상한 {{ mysql_memory_limit }} 안에서 돌도록 기본값(서버 수 GB 기준)을 줄였다. 이유는 docs/mysql.md
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-config
+  namespace: {{ mysql_namespace }}
+data:
+  platform.cnf: |
+    [mysqld]
+    # ── 메모리 ──
+    # InnoDB가 데이터·인덱스를 캐시하는 곳. 메모리를 가장 많이 쓴다 (기본 128M, 서버라면 RAM의 50~70%)
+    innodb_buffer_pool_size = {{ mysql_innodb_buffer_pool_size }}
+    # 8.4 기본 64M → 16M. 커밋 전 로그를 잠깐 담는 버퍼. 작은 트랜잭션이 대부분이라 충분하다
+    innodb_log_buffer_size = 16M
+    # 연결 하나마다 버퍼를 따로 잡으므로 상한을 정한다 (기본 151)
+    max_connections = {{ mysql_max_connections }}
+    # 열어 둘 테이블 수 (기본 4000/2000). 테이블이 수십 개뿐이다
+    table_open_cache = 400
+    table_definition_cache = 400
+    # 쿼리 중 임시 테이블을 메모리에 둘 최대 크기 (기본 16M~), 넘으면 디스크로
+    tmp_table_size = 16M
+    max_heap_table_size = 16M
+    # 성능 측정용 기능. 켜두면 고정으로 100~200MB를 쓴다. 지금은 끄고 모니터링 단계에서 다시 판단
+    performance_schema = OFF
+    # X 프로토콜(33060 포트, MySQL Shell용). 쓰지 않으므로 끈다
+    mysqlx = OFF
+
+    # ── 동작 ──
+    # 접속할 때마다 IP를 도메인으로 바꾸는 DNS 조회를 하지 않는다 (느려지거나 멈추는 원인)
+    skip_name_resolve = ON
+    host_cache_size = 0
+    character_set_server = utf8mb4
+    collation_server = utf8mb4_0900_ai_ci
+    # 느린 쿼리 기록 (1초 이상). 로그는 데이터 폴더에 쌓인다
+    slow_query_log = ON
+    long_query_time = 1

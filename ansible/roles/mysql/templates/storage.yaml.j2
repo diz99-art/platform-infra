@@ -1,0 +1,66 @@
+# MySQL용 저장소: 노드의 고정 경로를 가리키는 PV를 직접 만든다 (정적 프로비저닝).
+# local-path(동적)와 다른 점
+#   - 경로를 우리가 정한다 → k3s를 지워도 /srv/... 는 남는다
+#   - Retain → PVC를 지워도 PV와 데이터는 남는다 (자동 삭제 없음)
+#   - claimRef → 이 PV는 정해진 PVC에만 묶인다 (다른 PVC가 가로채지 못함)
+
+# provisioner가 없는 StorageClass: "자동으로 만들지 말고, 미리 만든 PV 중에서 골라라"
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-static
+provisioner: kubernetes.io/no-provisioner
+# 파드가 어느 노드에 뜰지 정해진 뒤에 PV를 묶는다. local PV는 노드에 붙어 있으므로 필요하다.
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mysql-data
+  labels:
+    app: mysql
+spec:
+  capacity:
+    storage: {{ mysql_data_size }}
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-static
+  claimRef:
+    namespace: {{ mysql_namespace }}
+    name: data-mysql-0          # StatefulSet의 volumeClaimTemplates(data) + 파드 이름(mysql-0)
+  local:
+    path: {{ mysql_data_path }}
+  # local PV는 "이 노드에만 있다"를 반드시 적어야 한다 → 이 PV를 쓰는 파드도 이 노드에만 뜬다
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values: [{{ mysql_node }}]
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mysql-backup
+  labels:
+    app: mysql-backup
+spec:
+  capacity:
+    storage: {{ mysql_backup_size }}
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-static
+  claimRef:
+    namespace: {{ mysql_namespace }}
+    name: mysql-backup
+  local:
+    path: {{ mysql_backup_path }}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values: [{{ mysql_node }}]

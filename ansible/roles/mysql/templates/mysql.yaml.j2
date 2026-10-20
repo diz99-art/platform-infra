@@ -1,0 +1,127 @@
+# MySQL 서버. StatefulSet인 이유는 docs/mysql.md
+
+# headless Service (clusterIP: None): StatefulSet 파드마다 고정 DNS 이름을 준다
+#   → mysql-0.mysql-headless.{{ mysql_namespace }}.svc.cluster.local
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-headless
+  namespace: {{ mysql_namespace }}
+spec:
+  clusterIP: None
+  selector:
+    app: mysql
+  ports:
+    - name: mysql
+      port: 3306
+---
+# 앱이 접속할 주소: mysql.{{ mysql_namespace }}.svc.cluster.local:3306
+# 준비(readiness)된 파드에만 연결을 보낸다. 클러스터 안에서만 보인다 (NodePort/LoadBalancer 아님).
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: {{ mysql_namespace }}
+spec:
+  selector:
+    app: mysql
+  ports:
+    - name: mysql
+      port: 3306
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  namespace: {{ mysql_namespace }}
+spec:
+  serviceName: mysql-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+      annotations:
+        # 설정(ConfigMap) 내용이 바뀌면 이 값이 바뀌어 파드가 새로 뜬다 (ConfigMap만 바뀌면 MySQL은 모른다)
+        platform-infra/config-hash: "{{ lookup('template', 'config.yaml.j2') | hash('sha256') | truncate(16, True, '') }}"
+    spec:
+      # PV와 같은 노드에 고정. (local PV의 nodeAffinity만으로도 고정되지만, 의도를 파드에도 분명히 적는다)
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: [{{ mysql_node }}]
+      # 종료 신호를 받고 버퍼를 디스크에 다 쓸 시간 (기본 30초)
+      terminationGracePeriodSeconds: 60
+      # root가 아닌 mysql 사용자(999)로 실행. 데이터 폴더 주인도 999로 맞춰 두었다.
+      securityContext:
+        runAsUser: {{ mysql_uid }}
+        runAsGroup: {{ mysql_uid }}
+        runAsNonRoot: true
+      containers:
+        - name: mysql
+          image: {{ mysql_image }}
+          ports:
+            - name: mysql
+              containerPort: 3306
+          env:
+            # 처음 데이터 폴더를 만들 때만 쓰인다. 이후 root 비밀번호를 바꾸려면 MySQL 안에서 ALTER USER
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-root
+                  key: password
+          resources:
+            requests:
+              cpu: {{ mysql_cpu_request }}
+              memory: {{ mysql_memory_request }}
+            # CPU limit은 두지 않는다: 넘으면 강제로 느려져(스로틀링) 응답이 튄다. 메모리 limit만 둔다
+            limits:
+              memory: {{ mysql_memory_limit }}
+          # 처음 기동(데이터 폴더 초기화)은 1분 넘게 걸릴 수 있다. 성공할 때까지 아래 두 검사를 미룬다 (최대 5분)
+          startupProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-h", "127.0.0.1", "--connect-timeout=3"]
+            periodSeconds: 5
+            failureThreshold: 60
+          # 살아 있나? 실패가 계속되면 컨테이너를 재시작한다.
+          # mysqladmin ping은 비밀번호가 틀려도 서버가 응답하면 성공 → 비밀번호 문제로 재시작되지 않는다
+          livenessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-h", "127.0.0.1", "--connect-timeout=3"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # 요청을 받을 준비가 됐나? 실패하면 재시작하지 않고 Service에서만 뺀다
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\" mysql -uroot -h127.0.0.1 -e 'SELECT 1' >/dev/null"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+            - name: config
+              mountPath: /etc/mysql/conf.d
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: mysql-config
+  # 파드마다 PVC를 하나씩 만든다 (이름: data-mysql-0) → storage.yaml의 PV mysql-data에 묶인다
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        storageClassName: local-static
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: {{ mysql_data_size }}

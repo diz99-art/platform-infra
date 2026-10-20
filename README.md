@@ -42,7 +42,8 @@
 
 - [x] 1단계: VM과 Ansible 준비
 - [x] 2단계: Ansible로 k3s 설치
-- [ ] 이후: MySQL·Redis·Kafka 배포, 서비스 배포, 모니터링
+- [x] 3단계: MySQL (Vault 비밀 관리, StatefulSet, 서비스별 DB·계정, 백업·복구)
+- [ ] 이후: Redis·Kafka, 서비스 배포, ArgoCD, 모니터링
 
 ## 1단계: VM과 Ansible 준비
 
@@ -165,3 +166,84 @@ export KUBECONFIG="$HOME/.kube/platform-infra.yaml:$HOME/.kube/config"
 - **`--limit workers`로 워커만 실행하면 실패**: 조인 토큰과 서버 IP를 cp1에서 가져오므로 cp1도 같이 실행돼야 한다. 롤 처음에 assert로 알아보기 쉬운 메시지를 띄운다.
 - **kubectl이 다른 클러스터(Docker Desktop)를 봄**: `kubectl config current-context`로 확인하고 `kubectl config use-context platform-infra`.
 - **첫 실행의 `remote_tmp /root/.ansible/tmp did not exist` 경고**: sudo로 처음 실행할 때 임시 폴더를 만들었다는 안내다. 무해하고 두 번째부터는 안 나온다.
+
+## 3단계: MySQL
+
+### 한 일
+
+1. 비밀번호 6개를 무작위로 만들어 Ansible Vault로 암호화(`ansible/group_vars/all/vault.yml`). Ansible이 풀어서 쿠버네티스 Secret을 만든다. 평문은 어디에도 파일로 남지 않는다
+2. MySQL 8.4.11을 `data` 네임스페이스에 StatefulSet으로 배포. worker1의 고정 경로 PV(Retain)에 데이터를 둔다
+3. 서비스별 DB 4개(coupon, auth, notification, file)와 자기 DB에만 권한이 있는 전용 계정, 읽기 전용 백업 계정
+4. 매일 03:00 백업 CronJob, 맥으로 가져오는 스크립트, 복구 스크립트. 복구 훈련 2번
+
+### 구조
+
+```
+맥: ansible-playbook mysql.yml  (vault.yml을 풀어 Secret 생성)
+ │
+ ├─ data 네임스페이스
+ │    StatefulSet mysql (worker1 고정) ─ PVC data-mysql-0 ─ PV mysql-data (Retain) ─ worker1:/srv/data/mysql
+ │    Service mysql (ClusterIP, 클러스터 안에서만)  ← 앱 접속: mysql.data.svc.cluster.local:3306
+ │    CronJob mysql-backup (매일 03:00) ─ PV mysql-backup ─ worker1:/srv/backup/mysql (7일)
+ │                                                          └─ scripts/fetch-mysql-backups.sh → 맥 ~/platform-backups/mysql (30일)
+ └─ apps 네임스페이스
+      Secret mysql-coupon / mysql-auth / mysql-notification / mysql-file  (앱이 env로 받음)
+
+MySQL 안: DB coupon ← 계정 coupon, DB auth ← 계정 auth, ... (각자 자기 DB만), 계정 backup (읽기 전용)
+```
+
+플레이북: `ansible/mysql.yml` → 롤 `ansible/roles/mysql` (tasks: storage → k8s → schema, templates: 저장소·설정·MySQL·백업)
+
+### 설계 결정 (자세한 이유: [docs/mysql.md](docs/mysql.md))
+
+- **Vault와 Secret**: Vault는 Git에 보관하기 위한 암호화(AES256), Secret은 파드에 전달하기 위한 객체(base64일 뿐 암호화 아님). Secret YAML은 저장소에 없고, pre-commit hook(`scripts/check-secrets.sh`)이 평문 vault·Secret 매니페스트·`.vault-pass` 커밋을 막는다
+- **StatefulSet**: 고정 이름(`mysql-0`), 파드마다 자기 PVC, 옛 파드가 완전히 끝난 뒤 새 파드를 띄움 → 같은 데이터 폴더를 MySQL 두 개가 동시에 여는 일이 없다
+- **고정 경로 PV + Retain + nodeAffinity**: k3s를 지워도, PVC를 지워도 데이터 폴더가 남는다. 디스크가 worker1에 있으므로 파드도 worker1에 고정
+- **자원**: requests 250m/512Mi, limit 메모리 768Mi만 (CPU limit은 스로틀링 때문에 두지 않음). 버퍼 풀 256M, performance_schema OFF, 연결 120 (계정당 25)
+- **Probe**: startup(초기화 최대 5분 기다림), liveness(`mysqladmin ping`, 비밀번호와 무관), readiness(`SELECT 1`, 실패하면 Service에서만 뺌)
+- **최소 권한**: 서비스 계정은 자기 DB에 SELECT·INSERT·UPDATE·DELETE·CREATE·ALTER·INDEX 등만. DROP, GRANT, 다른 DB, 전역 권한 없음
+
+### 검증 결과 (자세한 기록: [docs/mysql-verification.md](docs/mysql-verification.md))
+
+- 멱등성: `mysql.yml` 재실행 changed=0 (11초), `site.yml`도 changed=0
+- 최소 권한: coupon 계정은 `SHOW DATABASES`에 coupon만 보이고, 다른 DB 접근(1044/1142), DB·계정 생성, GRANT, 자기 테이블 DROP까지 모두 거부. 틀린 비밀번호는 1045
+- 데이터 보존: 파드 삭제 → 8초 뒤 그대로, worker1 재부팅 → 27초 뒤 그대로, **k3s 전체 제거·재설치 → 77초 뒤 데이터와 계정 그대로**
+- 백업: 3초, 보관 기간 지난 폴더 자동 삭제 확인
+- 메모리: MySQL 151MiB(재시작 직후) ~ 620MiB(100만 줄 직후), limit 768Mi
+
+### 복구 훈련 기록
+
+- 훈련 1 (작은 데이터): `DROP DATABASE coupon` → 앱 접속 실패(1049) → 맥의 백업으로 복구. 가져오기 0.18초 + 복구 0.20초 + 확인 0.09초 = **0.47초**.
+  마지막 백업 뒤에 넣은 1줄은 사라짐 → RPO(잃을 수 있는 데이터) = 백업 간격 (지금 최대 24시간)
+- 훈련 2 (100만 줄, 80MB 테이블, 백업 7.5MB): 가져오기 0.3초 + 복구 6.3초 + 확인 0.2초 = **6.7초**, 1,000,000줄 복구 확인
+
+### 사용법
+
+```bash
+cd ansible
+ansible-playbook mysql.yml                                  # 배포 (여러 번 실행해도 안전)
+ansible-vault edit group_vars/all/vault.yml                 # 비밀번호 보기·고치기
+ansible-playbook mysql.yml -e mysql_rotate_passwords=true   # 비밀번호 교체
+
+kubectl -n data create job --from=cronjob/mysql-backup backup-now   # 지금 백업
+scripts/fetch-mysql-backups.sh                                       # 맥으로 가져오기
+scripts/mysql-restore.sh coupon ~/platform-backups/mysql/<날짜-시각>   # 복구 (확인을 묻는다)
+kubectl apply -f k8s/examples/mysql-client.yaml                      # 앱처럼 접속해보기
+```
+
+처음 클론했을 때: `ansible/.vault-pass`(비밀번호 관리자에 보관한 값)를 만들고, `ln -sf ../../scripts/check-secrets.sh .git/hooks/pre-commit`으로 검사 hook을 연결한다.
+
+### 메모리 예산 (자세히: [docs/memory-plan.md](docs/memory-plan.md))
+
+- 실측: cp1 남음 약 740MB(taint로 앱 금지), worker1 MySQL 포함 751MB 사용, worker2 401MB 사용
+- Redis, Kafka, 쿠폰 서버 2개, ArgoCD, 모니터링만 올리면 워커 용량 5912MB 중 4958MB → **들어간다** (여유 16%)
+- 나머지 서비스 4개(Gateway·인증·알림·파일)까지 다 올리면 6750MB → **약 840MB 모자란다** → 워커를 4GB로 늘리거나(추천) 가벼운 도구로 바꿔야 한다
+
+### 트러블슈팅 (실제로 겪은 것)
+
+- **`Plugin 'mysql_native_password' is not loaded`**: MySQL 8.4는 옛 인증 방식이 꺼져 있다. `mysql_user`에 `plugin: caching_sha2_password` + `plugin_auth_string`을 쓴다
+- **계정 작업이 매번 changed**: caching_sha2 해시는 매번 달라 비교할 수 없다 → `update_password: on_create`
+- **`no_log`로 오류가 가려짐**: 진짜 비밀번호 대신 가짜 계정으로 같은 옵션을 넣어 ad-hoc(`ansible cp1 -m ansible.mysql.mysql_user ...`)으로 원인을 봤다
+- **VM에서 MySQL 폴더 그룹이 `systemd-journal`로 보임**: 컨테이너의 mysql(999)과 Ubuntu의 systemd-journal 그룹이 같은 숫자일 뿐이다. 권한은 숫자로 판단한다
+- **`created_at`이 9시간 이르게 보임**: MySQL 서버 시간대는 UTC다 (관례). 보여줄 때 KST로 바꾼다
+- **VM 재부팅 직후 `kubectl get node`가 계속 Ready**: 쿠버네티스가 노드 이상을 알아채기까지 약 40초 걸린다. VM 상태는 `multipass list`, `ssh worker1 uptime`으로 본다
