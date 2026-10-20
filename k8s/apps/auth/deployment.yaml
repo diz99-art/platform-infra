@@ -27,6 +27,9 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8081"
         prometheus.io/path: /actuator/prometheus
+        # Secret auth-jwt-keys에 들어 있는 키 id 목록. 앱은 키 파일을 시작할 때 한 번만 읽으므로,
+        # 키를 추가·삭제하면 이 값도 바꿔 push한다 → 파드가 다시 떠서 새 키를 읽는다 (키 교체 절차: platform-services의 docs/auth.md)
+        platform-infra/jwt-keys: "2026-10-20"
     spec:
       # 2대를 서로 다른 노드에 둔다. 노드 하나가 죽어도 1대는 살아 있게.
       # ScheduleAnyway: 노드가 하나뿐인 상황(점검 중)에도 일단 띄운다 (DoNotSchedule이면 Pending으로 남는다)
