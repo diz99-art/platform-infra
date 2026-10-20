@@ -1,0 +1,11 @@
+# 점검(kubectl drain) 때도 최소 1대는 남긴다. 2대를 한꺼번에 내리는 요청은 기다리게 된다
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: coupon
+  namespace: apps
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: coupon

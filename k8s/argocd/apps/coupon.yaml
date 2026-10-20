@@ -1,0 +1,22 @@
+# 쿠폰 서버 Application. 루트 Application(platform-apps)이 이 파일을 보고 만든다.
+# Git의 k8s/apps/coupon 폴더 = 클러스터 apps 네임스페이스의 쿠폰 서버
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: coupon
+  namespace: platform
+spec:
+  project: apps
+  source:
+    repoURL: https://github.com/diz99-art/platform-infra.git
+    targetRevision: main
+    path: k8s/apps/coupon
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: apps
+  syncPolicy:
+    automated:
+      prune: true      # Git에서 지운 객체는 클러스터에서도 지운다
+      selfHeal: true   # kubectl로 손으로 바꾸면 Git 상태로 되돌린다
+  # 이전 배포 기록을 10개까지 남긴다 (화면에서 어떤 커밋이 언제 배포됐는지 보인다)
+  revisionHistoryLimit: 10

@@ -32,7 +32,7 @@ mysql_databases: [coupon, auth, notification, file]
 mysql_service_privileges: SELECT,INSERT,UPDATE,DELETE,CREATE,ALTER,INDEX,REFERENCES,CREATE TEMPORARY TABLES,LOCK TABLES
 mysql_service_max_connections: 25
 # 서비스별로 다르게 줄 때. 계산: (replicas + 롤링 업데이트 maxSurge) × 커넥션 풀 크기 + 여유
-#   coupon: (2 + 1) × 10 + 5 = 35. 25로 두었더니 배포 중 3번째 파드가 연결 상한에 걸려 시작에 실패했다 (docs/coupon.md)
+#   coupon: (2 + 1) × 10 + 5 = 35 (풀 크기는 k8s/apps/coupon/config.env). 25로 두었더니 배포 중 3번째 파드가 연결 상한에 걸려 시작에 실패했다 (docs/coupon.md)
 # 합계는 max_connections(120) 안: 35 + 25 × 3 + 백업 2 = 112
 mysql_service_max_connections_overrides:
   coupon: 35

@@ -1,0 +1,42 @@
+# ArgoCD Helm 차트 값 (argo/argo-cd {{ argocd_chart_version }}). 기본값과 다른 것만 적는다.
+
+configs:
+  cm:
+    timeout.reconciliation: {{ argocd_reconciliation }}
+    timeout.reconciliation.jitter: {{ argocd_reconciliation_jitter }}
+    # 웹 화면에서 파드 안으로 셸 접속하는 기능은 끈다 (kubectl exec와 같은 권한을 화면에 여는 것)
+    exec.enabled: false
+  params:
+    # TLS는 끄고 HTTP로 받는다. 맥 안의 사설망이고 Traefik이 앞에 있다 (실제 운영이라면 Ingress에서 TLS)
+    server.insecure: true
+    # http://<노드 IP>/argocd 아래에서 화면과 API를 연다 (쿠폰 서버가 / 를 쓰므로 경로로 나눈다)
+    server.rootpath: {{ argocd_root_path }}
+    # 앱이 한두 개라 동시 처리 수를 줄인다 (기본 20 / 10). 줄이면 메모리와 CPU를 덜 쓴다
+    controller.status.processors: 5
+    controller.operation.processors: 2
+    # repo-server가 동시에 렌더링(kustomize build)하는 수. 렌더링마다 프로세스가 떠서 메모리가 튄다
+    reposerver.parallelism.limit: 2
+  secret:
+    # 관리자 비밀번호 (bcrypt 해시, vault에 저장). 이걸 주면 무작위 초기 비밀번호 Secret이 만들어지지 않는다
+    argocdServerAdminPassword: "{{ argocd_admin_password_bcrypt }}"
+    argocdServerAdminPasswordMtime: "{{ argocd_admin_password_mtime }}"
+
+# ── 끄는 구성요소 (docs/gitops.md) ──
+# Dex: GitHub·Google 같은 외부 로그인(SSO) 연결용. 관리자 계정 하나로 충분하다
+dex:
+  enabled: false
+# 알림(Slack 등으로 배포 결과 보내기). 지금은 보낼 곳이 없다
+notifications:
+  enabled: false
+# ApplicationSet: 템플릿 하나로 Application 여러 개를 찍어내는 기능. 앱이 적어 Application YAML을 직접 쓴다
+applicationSet:
+  replicas: 0
+
+controller:
+  resources: {{ argocd_resources.controller | to_json }}
+repoServer:
+  resources: {{ argocd_resources.repoServer | to_json }}
+server:
+  resources: {{ argocd_resources.server | to_json }}
+redis:
+  resources: {{ argocd_resources.redis | to_json }}

@@ -1,0 +1,16 @@
+# ArgoCD 설치 플레이북. 실행: cd ansible && ansible-playbook argocd.yml  (멱등)
+# 역할 분리: Ansible = 클러스터·데이터 계층·Secret·ArgoCD 자체, ArgoCD = 앱 배포 (Git의 k8s/apps/)
+# 순서: site.yml → mysql.yml → redis.yml → kafka.yml → argocd.yml
+
+- name: ArgoCD를 platform 네임스페이스에 설치 (맥에서 API 서버로)
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ kubeconfig_local_path }}"
+      context: "{{ kubeconfig_context }}"
+    group/kubernetes.core.helm:
+      kubeconfig: "{{ kubeconfig_local_path }}"
+      context: "{{ kubeconfig_context }}"
+  roles:
+    - argocd

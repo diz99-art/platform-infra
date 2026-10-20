@@ -1,0 +1,30 @@
+# [맥에서] Helm으로 ArgoCD 설치, 화면 Ingress, AppProject, 루트 Application
+
+- name: ArgoCD 네임스페이스
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ argocd_namespace }}"
+
+- name: Argo Helm 저장소
+  kubernetes.core.helm_repository:
+    name: argo
+    repo_url: https://argoproj.github.io/argo-helm
+
+# 차트 버전을 고정한다. 값은 템플릿에서 만든다 (관리자 비밀번호 해시가 들어 있어 no_log)
+- name: ArgoCD 설치·업그레이드 (Helm)
+  kubernetes.core.helm:
+    name: "{{ argocd_release }}"
+    chart_ref: argo/argo-cd
+    chart_version: "{{ argocd_chart_version }}"
+    release_namespace: "{{ argocd_namespace }}"
+    values: "{{ lookup('template', 'values.yaml.j2') | from_yaml }}"
+    wait: true
+    wait_timeout: 10m
+  no_log: true
+
+- name: Ingress, AppProject, 루트 Application
+  kubernetes.core.k8s:
+    template: bootstrap.yaml.j2

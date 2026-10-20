@@ -1,5 +1,5 @@
 # Redis 배포 플레이북. 실행: cd ansible && ansible-playbook redis.yml  (멱등)
-# 순서: site.yml → mysql.yml(StorageClass local-static을 만든다) → redis.yml → kafka.yml → coupon.yml
+# 순서: site.yml → mysql.yml(StorageClass local-static을 만든다) → redis.yml → kafka.yml → argocd.yml
 
 - name: 1) queue 노드에 고정 경로 만들기
   hosts: queue

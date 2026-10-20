@@ -1,15 +1,13 @@
-# 쿠폰 서버: Deployment(2대) + Service + PodDisruptionBudget + Ingress
-# 상태는 MySQL·Redis·Kafka에 있고 서버 자체는 상태가 없으므로 Deployment로 충분하다 (MySQL은 StatefulSet)
-
+# 쿠폰 서버. 상태는 MySQL·Redis·Kafka에 있고 서버 자체는 상태가 없어 Deployment로 충분하다 (docs/coupon.md)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: coupon
-  namespace: {{ coupon_namespace }}
+  namespace: apps
   labels:
     app: coupon
 spec:
-  replicas: {{ coupon_replicas }}
+  replicas: 2
   selector:
     matchLabels:
       app: coupon
@@ -24,8 +22,6 @@ spec:
     metadata:
       labels:
         app: coupon
-      annotations:
-        platform-infra/config-hash: "{{ lookup('template', 'config.yaml.j2') | hash('sha256') | truncate(16, True, '') }}"
     spec:
       # 2대를 서로 다른 노드에 둔다. 노드 하나가 죽어도 1대는 살아 있게.
       # ScheduleAnyway: 노드가 하나뿐인 상황(점검 중)에도 일단 띄운다 (DoNotSchedule이면 Pending으로 남는다)
@@ -41,10 +37,11 @@ spec:
       terminationGracePeriodSeconds: 45
       securityContext:
         runAsNonRoot: true
-        runAsUser: {{ coupon_uid }}
+        runAsUser: 100
       containers:
         - name: coupon
-          image: {{ coupon_image_repo }}:{{ coupon_image_tag }}
+          # 태그는 kustomization.yaml의 images가 붙인다 (커밋 해시)
+          image: ghcr.io/diz99-art/coupon-system
           ports:
             - name: http
               containerPort: 8080
@@ -54,7 +51,7 @@ spec:
             - configMapRef:
                 name: coupon-config
           env:
-            # 3단계에서 Ansible이 vault 값으로 만든 Secret을 그대로 쓴다
+            # Secret은 Git에 없다. Ansible이 vault 값으로 만든다 (mysql.yml, redis.yml)
             - name: DB_HOST
               valueFrom: { secretKeyRef: { name: mysql-coupon, key: host } }
             - name: DB_NAME
@@ -67,11 +64,11 @@ spec:
               valueFrom: { secretKeyRef: { name: redis, key: password } }
           resources:
             requests:
-              cpu: {{ coupon_cpu_request }}
-              memory: {{ coupon_memory_request }}
+              cpu: 200m
+              memory: 640Mi
             # CPU limit 없음: JVM은 시작할 때 CPU를 많이 쓴다. limit이 있으면 시작이 몇 배 느려진다
             limits:
-              memory: {{ coupon_memory_limit }}
+              memory: 640Mi
           # Actuator 헬스 체크 (관리 포트 8081, Service로는 열지 않음)
           # 시작(스프링 컨텍스트 + DB·Redis·Kafka 연결)이 끝날 때까지 최대 3분 기다린다
           startupProbe:
@@ -96,48 +93,3 @@ spec:
             preStop:
               sleep:
                 seconds: 10
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: coupon
-  namespace: {{ coupon_namespace }}
-spec:
-  selector:
-    app: coupon
-  ports:
-    - name: http
-      port: 80
-      targetPort: http
----
-# 점검(kubectl drain) 때도 최소 1대는 남긴다. 2대를 한꺼번에 내리는 요청은 기다리게 된다
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: coupon
-  namespace: {{ coupon_namespace }}
-spec:
-  minAvailable: 1
-  selector:
-    matchLabels:
-      app: coupon
----
-# 맥 브라우저 → 노드 IP:80 → Traefik → coupon:80
-# 지금은 쿠폰 서버가 유일한 앱이라 / 전체를 받는다. Gateway가 생기면 Gateway가 / 를 받고 쿠폰은 Gateway 뒤로 들어간다
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: coupon
-  namespace: {{ coupon_namespace }}
-spec:
-  ingressClassName: traefik
-  rules:
-    - http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: coupon
-                port:
-                  name: http

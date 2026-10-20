@@ -1,0 +1,64 @@
+# ArgoCD를 처음 연결하는 객체들 (Ansible이 만든다). 그 다음부터는 Git이 기준이다.
+
+# 맥 브라우저 → 노드 IP:80/argocd → Traefik → argocd-server
+# (쿠폰 서버 Ingress의 / 보다 /argocd 가 더 길어서 먼저 맞는다)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd-server
+  namespace: {{ argocd_namespace }}
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          - path: {{ argocd_root_path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ argocd_release }}-server
+                port:
+                  name: http
+---
+# 앱이 할 수 있는 일의 울타리. Git의 Application은 모두 이 프로젝트에 속한다
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: apps
+  namespace: {{ argocd_namespace }}
+spec:
+  description: 플랫폼 앱 (apps 네임스페이스에만 배포)
+  # 이 저장소에서 온 매니페스트만
+  sourceRepos:
+    - {{ argocd_repo_url }}
+  # apps 네임스페이스에만
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: apps
+  # 네임스페이스·노드·StorageClass 같은 클러스터 전체 객체는 못 만든다 (Ansible 몫)
+  clusterResourceWhitelist: []
+  # Secret은 Git으로 관리하지 않는다 (Ansible Vault → Secret). 실수로 Git에 넣어도 ArgoCD가 배포를 거부한다
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: Secret
+---
+# 루트 Application (app of apps): Git의 {{ argocd_apps_path }} 폴더에 있는 Application YAML들을 배포한다
+# → 새 앱을 올리려면 그 폴더에 파일 하나를 추가하고 push하면 된다
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-apps
+  namespace: {{ argocd_namespace }}
+spec:
+  project: default
+  source:
+    repoURL: {{ argocd_repo_url }}
+    targetRevision: {{ argocd_repo_revision }}
+    path: {{ argocd_apps_path }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ argocd_namespace }}
+  syncPolicy:
+    automated:
+      prune: true      # Git에서 지운 Application은 클러스터에서도 지운다
+      selfHeal: true   # 누가 손으로 바꾸면 Git 상태로 되돌린다

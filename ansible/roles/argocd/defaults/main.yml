@@ -1,0 +1,29 @@
+# ArgoCD 롤 기본값. 설계 이유는 docs/gitops.md
+
+argocd_namespace: platform
+argocd_chart_version: 10.10.5        # ArgoCD v3.5.5
+argocd_release: argocd
+
+# ArgoCD가 지켜볼 Git 저장소 (public이라 접속 정보가 필요 없다)
+argocd_repo_url: https://github.com/diz99-art/platform-infra.git
+argocd_repo_revision: main
+# 루트 Application이 지켜보는 폴더. 여기에 Application YAML을 넣으면 그 앱이 배포된다 (app of apps)
+argocd_apps_path: k8s/argocd/apps
+
+# 맥 브라우저 주소: http://<노드 IP>/argocd
+argocd_root_path: /argocd
+
+# Git을 다시 확인하는 간격. 기본 120초 + 무작위 0~60초 → 60초 + 0~10초
+# (GitHub가 클러스터로 알림(webhook)을 보낼 수 없어서(맥 안의 사설망) 주기적으로 확인하는 방식만 쓴다)
+argocd_reconciliation: 60s
+argocd_reconciliation_jitter: 10s
+
+# 관리자 비밀번호 바꾼 시각 (해시와 함께 고정. 바꾸면 기존 로그인 세션이 끊긴다)
+argocd_admin_password_mtime: "2026-10-20T00:00:00Z"
+
+# 자원 (docs/memory-plan.md: ArgoCD 600MB 예산)
+argocd_resources:
+  controller: { requests: { cpu: 50m, memory: 192Mi }, limits: { memory: 320Mi } }
+  repoServer: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 192Mi } }
+  server:     { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 128Mi } }
+  redis:      { requests: { cpu: 10m, memory: 16Mi }, limits: { memory: 64Mi } }
