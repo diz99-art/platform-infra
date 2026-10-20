@@ -3,10 +3,12 @@
 groups:
   - name: platform
     rules:
-      # 컨테이너 메모리 85% 초과: 계속 오르면 OOMKilled. working set = 커널이 돌려받을 수 없는 메모리(캐시 일부 제외)
+      # 컨테이너 메모리 85% 초과: 계속 오르면 OOMKilled.
+      # RSS(익명 메모리) 기준: working set은 실행 파일을 읽어 둔 파일 캐시까지 포함해서, 커널이 OOM 전에 돌려받을 수 있는 메모리도 센다
+      # (Grafana: working set 305Mi 중 캐시 100Mi → working set 기준이면 늘 95%로 울린다. RSS는 211Mi = 66%)
       - alert: ContainerMemoryHigh
         expr: |
-          max by (namespace, pod, container) (container_memory_working_set_bytes)
+          max by (namespace, pod, container) (container_memory_rss)
             / on (namespace, pod, container)
           max by (namespace, pod, container) (container_spec_memory_limit_bytes > 0)
           > 0.85

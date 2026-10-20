@@ -84,10 +84,10 @@ b.panel("노드가 응답하나 (node-exporter up)", [('up{job="node-exporter"}'
 b.panel("최근 1시간 재시작", [('sum by (namespace, pod) (increase(kube_pod_container_status_restarts_total[1h])) > 0', '{{namespace}}/{{pod}}')],
         w=8, kind="stat", thresholds=[(1, "red")])
 b.row("컨테이너 메모리")
-b.panel("컨테이너 메모리 / limit", [(f'max by (namespace, pod, container) ({WS}) / on (namespace, pod, container) max by (namespace, pod, container) ({LIM} > 0)',
+b.panel("컨테이너 메모리(RSS) / limit", [(f'max by (namespace, pod, container) (container_memory_rss) / on (namespace, pod, container) max by (namespace, pod, container) ({LIM} > 0)',
                                     '{{namespace}}/{{pod}}')],
         unit="percentunit", w=24, h=10, thresholds=[(0.85, "red")], max_=1,
-        description="working set / limit. 85% 넘게 5분이면 ContainerMemoryHigh 알림")
+        description="RSS(돌려받을 수 없는 메모리) / limit. 85% 넘게 5분이면 ContainerMemoryHigh 알림. working set은 파일 캐시를 포함해 더 크게 보인다")
 b.panel("컨테이너 메모리 (working set)", [(f'sum by (namespace, pod) ({WS})', '{{namespace}}/{{pod}}')],
         unit="bytes", w=24, h=10, stack=True)
 b.row("데이터 계층")

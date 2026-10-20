@@ -348,8 +348,8 @@
   },
   {
    "type": "timeseries",
-   "title": "컨테이너 메모리 / limit",
-   "description": "working set / limit. 85% 넘게 5분이면 ContainerMemoryHigh 알림",
+   "title": "컨테이너 메모리(RSS) / limit",
+   "description": "RSS(돌려받을 수 없는 메모리) / limit. 85% 넘게 5분이면 ContainerMemoryHigh 알림. working set은 파일 캐시를 포함해 더 크게 보인다",
    "id": 9,
    "datasource": {
     "type": "prometheus",
@@ -399,7 +399,7 @@
       "type": "prometheus",
       "uid": "vm"
      },
-     "expr": "max by (namespace, pod, container) (container_memory_working_set_bytes) / on (namespace, pod, container) max by (namespace, pod, container) (container_spec_memory_limit_bytes > 0)",
+     "expr": "max by (namespace, pod, container) (container_memory_rss) / on (namespace, pod, container) max by (namespace, pod, container) (container_spec_memory_limit_bytes > 0)",
      "legendFormat": "{{namespace}}/{{pod}}"
     }
    ],
