@@ -18,4 +18,4 @@ configMapGenerator:
 # 이미지 태그 = platform-services의 커밋 해시. platform-services의 GitHub Actions가 이 줄을 바꿔 push한다
 images:
   - name: ghcr.io/diz99-art/platform-services-auth
-    newTag: pending
+    newTag: 099ab6f0c0514a20c285a1839f10b7da1892ca1f
