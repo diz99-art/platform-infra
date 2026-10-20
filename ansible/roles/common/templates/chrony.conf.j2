@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+# 시간 동기화 (docs/monitoring.md: 맥이 잠든 동안 VM 시계가 51분 늦어진 문제)
+{% for s in common_ntp_servers %}
+# 16~64초마다 확인 (minpoll 4 = 2^4초, maxpoll 6 = 2^6초)
+pool {{ s }} iburst minpoll 4 maxpoll 6
+{% endfor %}
+# 1초 넘게 어긋나면 천천히 맞추지 말고 바로 맞춘다. -1 = 처음 몇 번뿐 아니라 언제든 (Ubuntu 기본은 1 3: 처음 3번만)
+makestep 1 -1
+driftfile /var/lib/chrony/chrony.drift
+# 하드웨어 시계(RTC)도 맞춰 둔다
+rtcsync
+logdir /var/log/chrony
