@@ -1,0 +1,42 @@
+# [맥에서] Secret, 설정, StatefulSet 적용
+
+# 서버용: Redis가 include로 읽을 설정 조각(auth.conf)과 probe용 비밀번호
+- name: Redis 서버 Secret ({{ redis_namespace }})
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: redis
+        namespace: "{{ redis_namespace }}"
+      data:
+        password: "{{ redis_password | b64encode }}"
+        auth.conf: "{{ ('requirepass ' ~ redis_password ~ '\n') | b64encode }}"
+  no_log: true
+
+# 앱용 접속 정보. 지금은 계정 하나(default)를 쿠폰 서버가 쓴다. 서비스별 ACL 계정은 다음 단계 후보
+- name: Redis 접속 정보 Secret ({{ redis_app_namespace }})
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: redis
+        namespace: "{{ redis_app_namespace }}"
+      data:
+        password: "{{ redis_password | b64encode }}"
+        host: "{{ ('redis.' ~ redis_namespace ~ '.svc.cluster.local') | b64encode }}"
+        port: "{{ '6379' | b64encode }}"
+  no_log: true
+
+- name: Redis 설정 (ConfigMap)
+  kubernetes.core.k8s:
+    template: config.yaml.j2
+
+- name: Redis (PV, Service, StatefulSet) 적용 후 Ready까지 대기
+  kubernetes.core.k8s:
+    template: redis.yaml.j2
+    wait: true
+    wait_timeout: 300

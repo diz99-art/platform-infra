@@ -107,8 +107,9 @@ kubectl -n apps get secret mysql-coupon -o jsonpath='{.data.password}' | base64 
 - my.cnf (`templates/config.yaml.j2`): MySQL 기본값은 메모리가 수 GB인 서버 기준이라 줄였다
   - `innodb_buffer_pool_size = 256M`: 데이터·인덱스 캐시. 가장 큰 메모리 사용처. 768Mi 한도에서 연결·임시 테이블·OS 캐시 몫을 남긴 크기
   - `performance_schema = OFF`: 켜두면 고정으로 100~200MB. 지금은 끄고, 모니터링(mysqld_exporter) 단계에서 필요하면 켠다
-  - `max_connections = 120`, 계정마다 `MAX_USER_CONNECTIONS 25` (백업 2): 서비스 하나가 연결을 다 잡아먹어 다른 서비스가 못 붙는 상황을 막는다.
-    25 = Spring 기본 커넥션 풀(HikariCP 10) × 쿠폰 서버 2대 + 여유
+  - `max_connections = 120`, 계정마다 `MAX_USER_CONNECTIONS` (기본 25, coupon 35, 백업 2): 서비스 하나가 연결을 다 잡아먹어 다른 서비스가 못 붙는 상황을 막는다.
+    계산: (replicas + 롤링 업데이트 maxSurge) × 커넥션 풀(HikariCP 10) + 여유. coupon = (2 + 1) × 10 + 5 = 35
+    (처음에는 maxSurge를 빼먹고 25로 잡아, 4단계에서 배포 중 3번째 파드가 연결 상한에 걸렸다 → docs/coupon.md)
   - `innodb_log_buffer_size 16M`, `table_open_cache 400`, `tmp_table_size 16M`, `mysqlx = OFF`
   - `skip_name_resolve`: 접속마다 IP→이름 DNS 조회를 안 한다 (계정 host가 `%`라 필요 없음)
   - `slow_query_log`: 1초 넘는 쿼리를 데이터 폴더의 로그에 남긴다

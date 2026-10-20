@@ -57,6 +57,8 @@ spec:
                   - key: kubernetes.io/hostname
                     operator: In
                     values: [{{ mysql_node }}]
+      # 같은 네임스페이스 Service마다 붙는 환경변수(MYSQL_PORT=tcp://..., KAFKA_PORT=... 등)를 넣지 않는다
+      enableServiceLinks: false
       # 종료 신호를 받고 버퍼를 디스크에 다 쓸 시간 (기본 30초)
       terminationGracePeriodSeconds: 60
       # root가 아닌 mysql 사용자(999)로 실행. 데이터 폴더 주인도 999로 맞춰 두었다.

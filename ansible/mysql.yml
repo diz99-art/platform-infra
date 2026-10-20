@@ -3,7 +3,7 @@
 # 비밀번호 교체: vault 수정 후 ansible-playbook mysql.yml -e mysql_rotate_passwords=true
 
 - name: 1) 데이터 노드에 고정 경로 만들기
-  hosts: data
+  hosts: mysql
   become: true
   gather_facts: false
   tasks:

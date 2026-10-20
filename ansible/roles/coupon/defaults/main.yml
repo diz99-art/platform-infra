@@ -1,0 +1,37 @@
+# 쿠폰 서버 배포 기본값. 이미지는 coupon-system 저장소의 GitHub Actions가 GHCR에 올린다.
+
+coupon_namespace: apps
+coupon_image_repo: ghcr.io/diz99-art/coupon-system
+# 배포할 버전 = coupon-system의 커밋 해시. 새 버전: ansible-playbook coupon.yml -e coupon_image_tag=<커밋 해시>
+coupon_image_tag: 8c5905788c538e4436da186c2d65d7baf5a7612e
+coupon_replicas: 2
+# 파드 하나의 DB 커넥션 풀. (replicas + 1) × 이 값이 MySQL coupon 계정 연결 상한(35)을 넘으면 안 된다
+coupon_db_pool_size: 10
+
+# 자원 (docs/memory-plan.md). 메모리는 requests = limits: JVM은 시작할 때 힙 크기를 정하므로, 노드가 붐빌 때도 이만큼은 확실히 받아야 한다
+# 처음 512Mi로 배포 → 1만 건 부하 뒤 실측 421~447Mi(87%): 힙 144 + 힙 밖 211(Metaspace 145) + 스레드 등 85.
+# 힙이 최대(256)까지 크면 약 552Mi라 512Mi를 넘는다 → 640Mi로 올렸다 (docs/coupon.md)
+coupon_cpu_request: 200m
+coupon_memory_request: 640Mi
+coupon_memory_limit: 640Mi
+
+# JVM 옵션 (이미지의 기본 MaxRAMPercentage=75를 덮어쓴다)
+#   MaxRAMPercentage=40   힙 = 컨테이너 limit의 40% = 256MB. 나머지 384MB는 메타스페이스·코드 캐시·스레드·Netty 버퍼 등 힙 밖 메모리
+#   MaxMetaspaceSize      클래스 정보 영역 상한 (실측 145MB). 없으면 끝없이 커질 수 있어 OOMKilled의 원인을 찾기 어렵다
+#   Xss512k               스레드 하나의 스택 (기본 1MB). Tomcat 스레드가 많아도 덜 쓴다
+#   ExitOnOutOfMemoryError 힙이 모자라면 반쯤 죽은 채 버티지 말고 바로 종료 → 쿠버네티스가 새로 띄운다
+#   user.timezone         서울 시각으로 발급 기간을 판정한다 (로컬 개발 환경과 같게)
+coupon_java_opts: >-
+  -XX:MaxRAMPercentage=40
+  -XX:MaxMetaspaceSize=192m
+  -Xss512k
+  -XX:+ExitOnOutOfMemoryError
+  -Duser.timezone=Asia/Seoul
+
+# 같은 클러스터 안의 주소 (Secret에 없는 값)
+coupon_redis_host: redis.data.svc.cluster.local
+coupon_kafka_bootstrap: kafka.data.svc.cluster.local:9092
+
+# 이미지의 app 사용자 번호 (Dockerfile의 adduser -S app → uid 100).
+# runAsNonRoot는 숫자 uid로만 root가 아님을 확인할 수 있어서, 이름(USER app)만 있는 이미지에는 숫자를 직접 적어야 한다.
+coupon_uid: 100

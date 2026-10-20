@@ -20,3 +20,4 @@ kubeconfig_context: platform-infra
 mysql_root_password: "{{ vault_mysql_root_password }}"
 mysql_backup_password: "{{ vault_mysql_backup_password }}"
 mysql_service_passwords: "{{ vault_mysql_service_passwords }}"
+redis_password: "{{ vault_redis_password }}"

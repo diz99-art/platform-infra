@@ -1,0 +1,26 @@
+# Kafka 롤 기본값 (KRaft 단일 노드: 브로커와 컨트롤러를 한 프로세스가 같이 한다, ZooKeeper 없음)
+
+kafka_image: apache/kafka:4.3.1
+kafka_namespace: data
+
+# 발급 경로(Redis + Kafka)를 둘 노드 = 인벤토리 [queue] 그룹 (worker2)
+kafka_node: "{{ groups['queue'][0] }}"
+kafka_data_path: /srv/data/kafka
+# 공식 이미지의 appuser (uid 1000, gid 1000)
+kafka_uid: 1000
+kafka_gid: 1000
+kafka_data_size: 5Gi
+
+# KRaft 클러스터 ID. 데이터 폴더(meta.properties)에 기록되고, 다시 켤 때 이 값이 같아야 기존 데이터를 연다.
+# 비밀이 아니다. 바꾸면 기존 데이터 폴더를 쓸 수 없다.
+kafka_cluster_id: H0THXD_AQy6pinxlvn3Orw
+
+# 메모리: JVM 힙은 고정, 나머지(limit - 힙)는 JVM 자체·네트워크 버퍼·OS 페이지 캐시 몫
+kafka_heap: 384m
+kafka_cpu_request: 100m
+kafka_memory_request: 512Mi
+kafka_memory_limit: 768Mi
+
+# 보관: 쿠폰 발급 메시지는 컨슈머가 몇 초 안에 DB에 저장하므로 오래 둘 필요가 없다 (기본 168시간 → 72시간)
+kafka_retention_hours: 72
+kafka_segment_bytes: 67108864   # 64MB (기본 1GB). 작게 잘라야 오래된 조각이 빨리 지워진다

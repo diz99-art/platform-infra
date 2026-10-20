@@ -20,16 +20,19 @@
  │                         CoreDNS, metrics-server, local-path-provisioner
  │                         (Traefik(Ingress)은 워커 중 하나에, ServiceLB는 모든 노드에 뜬다)
  │
- ├── worker1 (2 CPU / 4GB) ── 데이터 계층
- │       MySQL 8.4 (하나만)          Redis 7     Kafka (KRaft, 1대)
+ ├── worker1 (2 CPU / 4GB) ── 저장 경로
+ │       MySQL 8.4 (하나만)                     쿠폰 서버 1번
  │       ├─ DB coupon       ← 계정 coupon
  │       ├─ DB auth         ← 계정 auth
  │       ├─ DB notification ← 계정 notification
  │       └─ DB file         ← 계정 file
  │
- └── worker2 (2 CPU / 4GB) ── 애플리케이션 계층
+ └── worker2 (2 CPU / 4GB) ── 발급 경로
+         Redis 7.4 (재고 판정)   Kafka 4.3 (KRaft 1대)   쿠폰 서버 2번   Traefik
+
+ 앱 (stateless, 스케줄러가 노드에 나눠 배치):
          Gateway ─┬─ 인증 서버
-                  ├─ 쿠폰 서버 ──── Redis, Kafka, MySQL(coupon)
+                  ├─ 쿠폰 서버 × 2 ─── Redis, Kafka, MySQL(coupon)   ← 4단계에서 이전
                   ├─ 알림 서버
                   └─ 파일 서버
 
@@ -43,7 +46,8 @@
 - [x] 1단계: VM과 Ansible 준비
 - [x] 2단계: Ansible로 k3s 설치
 - [x] 3단계: MySQL (Vault 비밀 관리, StatefulSet, 서비스별 DB·계정, 백업·복구)
-- [ ] 이후: Redis·Kafka, 서비스 배포, ArgoCD, 모니터링
+- [x] 4단계: Redis·Kafka, 쿠폰 서버 이전 (GitHub Actions ARM64 이미지 → GHCR → k3s)
+- [ ] 이후: 플랫폼 서비스(Gateway·인증·알림·파일), ArgoCD, 모니터링, Vault 단계(Secret 저장 암호화, NetworkPolicy)
 
 ## 1단계: VM과 Ansible 준비
 
@@ -248,3 +252,63 @@ kubectl apply -f k8s/examples/mysql-client.yaml                      # 앱처럼
 - **VM에서 MySQL 폴더 그룹이 `systemd-journal`로 보임**: 컨테이너의 mysql(999)과 Ubuntu의 systemd-journal 그룹이 같은 숫자일 뿐이다. 권한은 숫자로 판단한다
 - **`created_at`이 9시간 이르게 보임**: MySQL 서버 시간대는 UTC다 (관례). 보여줄 때 KST로 바꾼다
 - **VM 재부팅 직후 `kubectl get node`가 계속 Ready**: 쿠버네티스가 노드 이상을 알아채기까지 약 40초 걸린다. VM 상태는 `multipass list`, `ssh worker1 uptime`으로 본다
+
+## 4단계: 쿠폰 서버 이전
+
+### 한 일
+
+1. Redis 7.4와 Kafka 4.3(KRaft 단일 노드)을 `data` 네임스페이스에 StatefulSet으로 배포 (worker2 고정 경로 PV)
+2. coupon-system 저장소의 GitHub Actions에 이미지 job 추가: main 테스트 통과 → ARM64 러너에서 빌드 → `ghcr.io/diz99-art/coupon-system:<커밋 해시>`
+3. 쿠폰 서버를 `apps` 네임스페이스에 Deployment 2대 + Service + PDB + Ingress로 배포. prod 프로필, 설정은 ConfigMap, 비밀번호는 vault → Secret 재사용
+4. Swagger·발급 API·Kafka→MySQL 저장, 파드 삭제·롤링 업데이트 중 무중단, 메모리 실측
+
+### 구조
+
+```
+POST /coupons/{id}/issue  (맥 → 노드IP:80 → Traefik → coupon Service → 파드 2대 중 하나)
+  ├─ Redis (worker2): Lua로 기간·재고·중복 판정, 카운터 +1                  ┐ 발급 경로: 이 둘만 있으면 202 응답
+  ├─ Kafka (worker2): 발급 메시지 → 202 응답                                ┘
+  └─ 컨슈머 (쿠폰 서버 안) → MySQL (worker1) coupon_issue 저장             ← 비동기. 실패하면 재시도 → DLT → 1분마다 대사 작업이 보정
+
+GitHub (coupon-system main push) → Actions: test → image(ARM64) → GHCR
+맥: ansible-playbook coupon.yml -e coupon_image_tag=<커밋 해시>
+```
+
+플레이북: `redis.yml`, `kafka.yml`, `coupon.yml` (롤: `roles/redis`, `roles/kafka`, `roles/coupon`). 순서: `site.yml → mysql.yml → redis.yml → kafka.yml → coupon.yml`
+
+### 설계 결정 (자세한 이유: [docs/redis-kafka.md](docs/redis-kafka.md), [docs/coupon.md](docs/coupon.md))
+
+- **배치**: MySQL은 worker1, Redis와 Kafka는 함께 worker2. 상태 있는 구성요소의 limit이 768 대 960으로 고르게 나뉘고, 발급 API가 의존하는 Redis·Kafka가 한 노드에 있어 "발급이 멈추는 노드"가 하나뿐이다. worker1(MySQL)이 죽으면 발급은 계속되고 저장만 늦어진다
+- **Redis 보존**: 재고 카운터가 들어 있어 캐시가 아니라 데이터 → AOF + 1초마다 fsync, `noeviction`(꽉 차면 지우지 말고 거부), 비밀번호는 Secret 파일을 `include`
+- **Kafka 보존**: `log.dirs`를 PV로(기본 /tmp), `CLUSTER_ID` 고정, 1초마다 flush(복제본이 없어서), 토픽 자동 생성 끔, 보관 72시간
+- **Probe**: Redis는 `redis-cli ping`, Kafka는 `tcpSocket`(exec 검사는 JVM을 새로 띄워 수백 MB를 씀), 쿠폰 서버는 Actuator `/actuator/health/liveness`·`readiness` (관리 포트 8081, 외부에 안 열림)
+- **이미지 태그 = 커밋 해시**: 불변이라 노드마다 다른 이미지가 돌 일이 없고, 떠 있는 버전을 바로 추적하고, 되돌릴 때 예전 해시로 다시 배포하면 된다. `latest`는 매니페스트가 그대로라 쿠버네티스가 바뀐 줄도 모른다
+- **무중단**: 노드별로 1대씩(topologySpreadConstraints), maxSurge 1·maxUnavailable 0, preStop 10초, graceful shutdown, PDB minAvailable 1
+- **JVM**: 메모리 requests = limits = 640Mi, 힙 40%(256MB), Metaspace 상한 192m, OOM이면 즉시 종료, CPU limit 없음
+- **`enableServiceLinks: false`** (모든 파드): 같은 네임스페이스 Service마다 붙는 `KAFKA_PORT=tcp://...` 같은 환경변수가 Kafka 이미지의 설정으로 바뀌어 시작이 깨질 수 있다
+
+### 검증 결과
+
+- Swagger: 맥 브라우저에서 `http://192.168.252.2/swagger-ui.html` (관리 포트의 `/actuator/health`는 밖에서 404)
+- API: 수량 5 쿠폰에 7명 → 5명 202, 2명 409 매진, 중복 409. MySQL에 5건, 컨슈머 lag 0
+- **파드 삭제 중 발급**: 40초간 10,856건 전부 202, 실패 0. MySQL = Redis 카운터 = Redis 목록 = 10,856
+- **롤링 업데이트 중 발급**: 30,833건 전부 202, 재시작 0 (연결 상한 수정 후). 저장은 컨슈머 리밸런스 동안 10~20초 늦어졌다가 전부 따라옴
+- 데이터 보존: Redis 키·Kafka 메시지를 넣고 파드를 지움 → 8초 뒤 그대로
+- 멱등성: `site/mysql/redis/kafka/coupon.yml` 모두 다시 실행 changed=0
+- CI: test 2분 32초 + image(ARM64) 2분 2초. GHCR 이미지는 익명 pull 가능(public) → pull secret 불필요
+
+### 메모리 실측과 여유율 (자세히: [docs/memory-plan.md](docs/memory-plan.md))
+
+- 실측 (부하 직후): worker1 used 1184MB, worker2 used 1368MB. 쿠폰 서버 423~494Mi, Kafka 423Mi, MySQL 187Mi, Redis 15Mi
+- 전체 계획의 limit 합 7400 / 7802MB → **여유 5%** (3단계 계획 13%에서 쿠폰 서버 512→640 등으로 +576MB)
+- 실측 기반 예상으로는 여유 25%. 다음 서비스는 실측으로 limit을 정하고, Kafka limit 축소·VictoriaMetrics로 여유 16%까지 되찾는 안을 문서에 적었다
+
+### 트러블슈팅 (실제로 겪은 것)
+
+- **쿠폰 서버 512Mi가 87%까지 참**: 힙 밖 메모리가 211MB(Metaspace 145)라 힙이 다 크면 limit을 넘는다 → 640Mi, 힙 40%, Metaspace 192m
+- **배포 중 새 파드가 `max_user_connections (25)` 초과로 시작 실패**: 롤링 업데이트 중에는 파드가 3대(풀 10 × 3 = 30) → coupon 계정 상한 35로. 3단계에서 maxSurge를 빼먹은 계산 실수
+- **배포 직후 DB 건수가 202 응답 수보다 적음**: 컨슈머 그룹 리밸런스 동안 저장이 멈췄다가 따라온다(lag 0, DLT 0 확인). 비동기 저장 구조의 정상 동작
+- **롤링 업데이트 중 `IncompleteRead` 4건 (32,540건 중)**: 서버에서는 발급·저장됐고 응답만 끊겼다(재요청하면 409라 중복 없음). 이후 재현되지 않음. Traefik ↔ Tomcat 연결 종료 경합으로 추정, 접근 로그로 다시 볼 과제
+- **Kafka 명령줄 도구는 브로커 파드 밖에서**: 도구도 JVM이라 브로커 컨테이너 안에서 돌리면 limit 768Mi를 넘을 수 있다 → `kubectl run kcli --image=apache/kafka:4.3.1 ...` 일회용 파드
+- **`runAsNonRoot`인데 이미지가 `USER app`(이름)뿐**: 쿠버네티스가 root인지 확인할 수 없어 거부한다 → 이미지의 uid(100)를 `runAsUser`에 숫자로 적었다
+- **zsh 변수 함정**: `for path in ...`가 PATH를 덮어씀, `$CID:count`의 `:c`가 수정자로 해석됨 → 다른 이름, `${CID}`

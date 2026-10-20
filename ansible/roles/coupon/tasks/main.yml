@@ -1,0 +1,27 @@
+# [맥에서] 쿠폰 서버 배포. 접속 정보 Secret은 mysql.yml(mysql-coupon)과 redis.yml(redis)이 먼저 만들어 둔다.
+
+- name: 필요한 Secret이 있는지 확인
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ coupon_namespace }}"
+    name: "{{ item }}"
+  loop: [mysql-coupon, redis]
+  register: coupon_secrets
+  no_log: true
+
+- name: Secret이 없으면 멈춘다
+  ansible.builtin.assert:
+    that: coupon_secrets.results | map(attribute='resources') | map('length') | min > 0
+    fail_msg: "apps 네임스페이스에 mysql-coupon 또는 redis Secret이 없습니다. mysql.yml, redis.yml을 먼저 실행하세요."
+    quiet: true
+
+- name: 쿠폰 서버 설정 (ConfigMap)
+  kubernetes.core.k8s:
+    template: config.yaml.j2
+
+# wait: Deployment의 새 파드가 전부 Ready(readiness probe 통과)가 될 때까지 기다린다
+- name: 쿠폰 서버 (Deployment, Service, PDB, Ingress) 적용 후 Ready까지 대기
+  kubernetes.core.k8s:
+    template: coupon.yaml.j2
+    wait: true
+    wait_timeout: 600

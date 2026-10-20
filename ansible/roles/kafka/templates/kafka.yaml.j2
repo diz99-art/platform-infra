@@ -1,0 +1,191 @@
+# Kafka 1대 (KRaft). 쿠폰 발급 메시지 큐.
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: kafka-data
+  labels:
+    app: kafka
+spec:
+  capacity:
+    storage: {{ kafka_data_size }}
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-static
+  claimRef:
+    namespace: {{ kafka_namespace }}
+    name: data-kafka-0
+  local:
+    path: {{ kafka_data_path }}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values: [{{ kafka_node }}]
+---
+# 앱이 처음 접속하는 주소(bootstrap): kafka.{{ kafka_namespace }}.svc.cluster.local:9092
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: {{ kafka_namespace }}
+spec:
+  selector:
+    app: kafka
+  ports:
+    - name: client
+      port: 9092
+---
+# 브로커가 "앞으로는 이 주소로 오라"고 알려주는(advertised) 고정 이름: kafka-0.kafka-headless.{{ kafka_namespace }}.svc.cluster.local
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  namespace: {{ kafka_namespace }}
+spec:
+  clusterIP: None
+  selector:
+    app: kafka
+  ports:
+    - name: client
+      port: 9092
+    - name: controller
+      port: 9093
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: {{ kafka_namespace }}
+spec:
+  serviceName: kafka-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: [{{ kafka_node }}]
+      # 꼭 필요하다: 쿠버네티스는 같은 네임스페이스의 Service마다 KAFKA_PORT=tcp://10.43.x.x:9092 같은 환경변수를 넣는데,
+      # 이 이미지는 KAFKA_로 시작하는 환경변수를 전부 Kafka 설정(port=tcp://...)으로 바꿔서 시작이 깨진다.
+      enableServiceLinks: false
+      # 종료할 때 로그를 정리하고 컨트롤러 상태를 저장할 시간
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsUser: {{ kafka_uid }}
+        runAsGroup: {{ kafka_gid }}
+        runAsNonRoot: true
+      containers:
+        - name: kafka
+          image: {{ kafka_image }}
+          ports:
+            - name: client
+              containerPort: 9092
+            - name: controller
+              containerPort: 9093
+          # 이 이미지는 KAFKA_FOO_BAR 환경변수를 foo.bar 설정으로 바꾼다. 하나라도 주면 기본 server.properties는 쓰지 않는다.
+          env:
+            - name: CLUSTER_ID
+              value: {{ kafka_cluster_id }}
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: broker,controller
+            - name: KAFKA_LISTENERS
+              value: PLAINTEXT://:9092,CONTROLLER://:9093
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: PLAINTEXT://kafka-0.kafka-headless.{{ kafka_namespace }}.svc.cluster.local:9092
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: PLAINTEXT
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: CONTROLLER
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: 1@localhost:9093
+            # 기본값은 /tmp (재시작하면 사라짐) → PV를 붙인 경로
+            - name: KAFKA_LOG_DIRS
+              value: /var/lib/kafka/data
+            # 브로커가 1대라 모든 내부 토픽의 복제본은 1개
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR
+              value: "1"
+            - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_NUM_PARTITIONS
+              value: "3"
+            # 토픽은 앱(KafkaConfig의 NewTopic)이 정해진 설정으로 만든다. 오타 난 토픽이 저절로 생기지 않게 막는다
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "false"
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "0"
+            - name: KAFKA_LOG_RETENTION_HOURS
+              value: "{{ kafka_retention_hours }}"
+            - name: KAFKA_LOG_SEGMENT_BYTES
+              value: "{{ kafka_segment_bytes }}"
+            # 1초마다 디스크에 확실히 쓴다. 복제본이 없는 단일 브로커라 VM이 갑자기 꺼지면 페이지 캐시의 메시지를 잃을 수 있어서다
+            - name: KAFKA_LOG_FLUSH_INTERVAL_MS
+              value: "1000"
+            # 작은 노드용 스레드 수 (기본 network 3, io 8)
+            - name: KAFKA_NUM_NETWORK_THREADS
+              value: "2"
+            - name: KAFKA_NUM_IO_THREADS
+              value: "4"
+            # 아래는 Kafka 설정이 아니라 시작 스크립트가 읽는 JVM 옵션
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms{{ kafka_heap }} -Xmx{{ kafka_heap }}"
+          resources:
+            requests:
+              cpu: {{ kafka_cpu_request }}
+              memory: {{ kafka_memory_request }}
+            limits:
+              memory: {{ kafka_memory_limit }}
+          # 검사는 모두 "9092 포트가 열려 있나"(tcpSocket)로 한다.
+          # kafka-broker-api-versions.sh 같은 exec 검사는 매번 JVM을 새로 띄워 수백 MB와 몇 초를 쓴다 → 작은 노드에서는 검사가 장애를 만든다
+          startupProbe:
+            tcpSocket:
+              port: client
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: client
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: client
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        storageClassName: local-static
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: {{ kafka_data_size }}

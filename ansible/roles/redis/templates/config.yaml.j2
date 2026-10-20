@@ -1,0 +1,31 @@
+# Redis 설정 파일. 바뀌면 StatefulSet의 config-hash가 바뀌어 파드가 다시 뜬다.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: {{ redis_namespace }}
+data:
+  redis.conf: |
+    port 6379
+    dir /data
+
+    # ── 데이터 보존 ──
+    # AOF: 모든 쓰기 명령을 파일에 이어 쓴다. 다시 켜면 이 파일을 처음부터 실행해 상태를 되살린다.
+    appendonly yes
+    # 1초마다 디스크에 확실히 쓴다(fsync) → 최악의 경우 마지막 1초를 잃는다. always는 안전하지만 느리다.
+    appendfsync everysec
+    # RDB 스냅샷은 끈다: AOF와 둘 다 쓰면 fork가 두 번 일어나 메모리가 더 튄다.
+    # (AOF 파일 앞부분은 RDB 형식이라 다시 켤 때 빠르다: aof-use-rdb-preamble 기본 yes)
+    save ""
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 16mb
+
+    # ── 메모리 ──
+    maxmemory {{ redis_maxmemory }}
+    # 꽉 차면 키를 지우지 말고 쓰기를 거부한다. 재고 카운터가 조용히 지워지면 초과 발급이 나기 때문이다.
+    maxmemory-policy noeviction
+
+    # ── 접속 ──
+    tcp-keepalive 60
+    # 비밀번호(requirepass)는 Secret으로 마운트한 파일에서 읽는다. 이 ConfigMap에는 비밀이 없다.
+    include /etc/redis/secret/auth.conf

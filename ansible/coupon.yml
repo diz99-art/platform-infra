@@ -1,0 +1,13 @@
+# 쿠폰 서버 배포 플레이북. 실행: cd ansible && ansible-playbook coupon.yml  (멱등)
+# 새 버전 배포: ansible-playbook coupon.yml -e coupon_image_tag=<coupon-system 커밋 해시>
+# 순서: site.yml → mysql.yml → redis.yml → kafka.yml → coupon.yml
+
+- name: 쿠폰 서버를 apps 네임스페이스에 배포 (맥에서 API 서버로)
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ kubeconfig_local_path }}"
+      context: "{{ kubeconfig_context }}"
+  roles:
+    - coupon

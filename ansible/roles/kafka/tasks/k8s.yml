@@ -1,0 +1,6 @@
+# [맥에서] Kafka 적용. 토픽은 쿠폰 서버가 시작할 때 만든다 (KafkaConfig의 NewTopic, 파티션 3, 복제본 1)
+- name: Kafka (PV, Service, StatefulSet) 적용 후 Ready까지 대기
+  kubernetes.core.k8s:
+    template: kafka.yaml.j2
+    wait: true
+    wait_timeout: 300

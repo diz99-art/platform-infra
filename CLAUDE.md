@@ -28,7 +28,10 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림·파일 서버를 운영�
 - 플레이북은 멱등하게 쓴다: 확인용 command에는 changed_when: false, 설치는 when 조건, 서비스 재시작은 핸들러로.
 - 비밀은 Ansible Vault(`group_vars/all/vault.yml`, `vault_` 접두사)에 두고 Ansible이 쿠버네티스 Secret을 만든다. Secret 매니페스트는 저장소에 두지 않는다.
 - MySQL: `data` 네임스페이스 StatefulSet, worker1 고정 경로 PV(Retain). 앱 접속 정보 Secret은 `apps` 네임스페이스의 `mysql-<서비스>`. 서비스 계정은 자기 DB에만 권한(DROP 없음).
-- 메모리 계획은 `docs/memory-plan.md`. 새 구성요소를 넣을 때 이 문서의 예산을 먼저 확인하고, 올린 뒤 실측해서 고친다 (워커 여유 목표 15%, 지금 13%).
+- 배치: MySQL은 worker1(`[mysql]`), Redis·Kafka는 worker2(`[queue]`), 앱은 스케줄러가 나눔. 모든 파드에 `enableServiceLinks: false`.
+- 이미지 태그는 커밋 해시만 쓴다 (latest 금지). Java 앱은 메모리 requests = limits, CPU limit 없음, 실측해서 limit을 정한다.
+- MySQL 계정 연결 상한 = (replicas + maxSurge) × 커넥션 풀 + 여유 (`mysql_service_max_connections_overrides`).
+- 메모리 계획은 `docs/memory-plan.md`. 새 구성요소를 넣을 때 이 문서의 예산을 먼저 확인하고, 올린 뒤 실측해서 고친다 (워커 여유 목표 15%, limit 합 기준 지금 5%: 다음 서비스부터 실측으로 limit을 정한다).
 - VM 크기 바꾸기: 한 대씩 `kubectl drain` → `multipass stop` → `multipass set local.<이름>.memory=…` → start → `kubectl uncordon`, `multipass/vms.conf`도 고친다.
 
 ## 명령어
@@ -44,6 +47,8 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림·파일 서버를 운영�
 - MySQL 배포: `cd ansible && ansible-playbook mysql.yml` (vault 비밀번호 파일 `ansible/.vault-pass` 필요)
 - 비밀 보기·고치기: `ansible-vault view|edit group_vars/all/vault.yml`. 평문 비밀번호를 파일·출력·커밋에 남기지 않는다 (no_log, check-secrets.sh hook)
 - MySQL 백업: `kubectl -n data create job --from=cronjob/mysql-backup <이름>`, 맥으로: `scripts/fetch-mysql-backups.sh`, 복구: `scripts/mysql-restore.sh <DB> <폴더>`
+- Redis·Kafka: `ansible-playbook redis.yml`, `kafka.yml` (worker2 고정). Kafka 도구는 일회용 파드에서: `kubectl -n data run kcli --rm -it --image=apache/kafka:4.3.1 --overrides='{"spec":{"enableServiceLinks":false}}' -- bash`
+- 쿠폰 서버: `ansible-playbook coupon.yml -e coupon_image_tag=<coupon-system 커밋 해시>`. 이미지는 coupon-system의 GitHub Actions가 GHCR에 올린다 (맥 Docker 안 씀)
 - kubectl: kubeconfig는 `~/.kube/platform-infra.yaml`, 컨텍스트 `platform-infra` (~/.zshrc의 KUBECONFIG에 등록)
 
 ## 진행 단계
@@ -51,3 +56,5 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림·파일 서버를 운영�
 - 1단계: VM과 Ansible 준비 (완료)
 - 2단계: Ansible로 k3s v1.36.5+k3s1 설치 (완료). 설계는 `docs/k3s-design.md`, 검증 기록은 `docs/k3s-verification.md`
 - 3단계: MySQL 8.4.11 (완료). 설계는 `docs/mysql.md`, 검증·복구 훈련 기록은 `docs/mysql-verification.md`
+- 4단계: Redis·Kafka, 쿠폰 서버 이전 (완료). `docs/redis-kafka.md`, `docs/coupon.md`
+- 다음: 플랫폼 서비스(Gateway·인증·알림·파일), ArgoCD, 모니터링. Secret 저장 암호화·NetworkPolicy는 Vault 단계에서

@@ -1,0 +1,153 @@
+# Redis 1대. 쿠폰 재고 카운터와 발급 유저 목록이 들어 있어 "캐시"가 아니라 데이터다 → 디스크에 남긴다(AOF).
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: redis-data
+  labels:
+    app: redis
+spec:
+  capacity:
+    storage: {{ redis_data_size }}
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-static       # mysql 롤이 만든 StorageClass (no-provisioner)
+  claimRef:
+    namespace: {{ redis_namespace }}
+    name: data-redis-0
+  local:
+    path: {{ redis_data_path }}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values: [{{ redis_node }}]
+---
+# 앱 접속 주소: redis.{{ redis_namespace }}.svc.cluster.local:6379
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: {{ redis_namespace }}
+spec:
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless
+  namespace: {{ redis_namespace }}
+spec:
+  clusterIP: None
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: {{ redis_namespace }}
+spec:
+  serviceName: redis-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+      annotations:
+        platform-infra/config-hash: "{{ lookup('template', 'config.yaml.j2') | hash('sha256') | truncate(16, True, '') }}"
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: [{{ redis_node }}]
+      # 같은 네임스페이스 Service마다 붙는 환경변수(REDIS_PORT=tcp://... 등)를 넣지 않는다 (docs/redis-kafka.md)
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsUser: {{ redis_uid }}
+        runAsGroup: {{ redis_gid }}
+        runAsNonRoot: true
+      containers:
+        - name: redis
+          image: {{ redis_image }}
+          command: ["redis-server", "/etc/redis/redis.conf"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          env:
+            # redis-cli가 읽는 비밀번호 환경변수 (probe용). -a 옵션은 명령줄에 비밀번호가 보여서 쓰지 않는다
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: redis
+                  key: password
+          resources:
+            requests:
+              cpu: {{ redis_cpu_request }}
+              memory: {{ redis_memory_request }}
+            limits:
+              memory: {{ redis_memory_limit }}
+          # AOF를 다시 읽는 동안에는 PING에 "LOADING"으로 답한다 → PONG이 나올 때까지 기다린다
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli ping | grep -q PONG"]
+            periodSeconds: 3
+            failureThreshold: 60
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli ping | grep -q PONG"]
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli ping | grep -q PONG"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /etc/redis/redis.conf
+              subPath: redis.conf
+              readOnly: true
+            - name: secret
+              mountPath: /etc/redis/secret
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: redis-config
+        - name: secret
+          secret:
+            secretName: redis
+            items:
+              - key: auth.conf
+                path: auth.conf
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        storageClassName: local-static
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: {{ redis_data_size }}

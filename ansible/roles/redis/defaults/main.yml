@@ -1,0 +1,20 @@
+# Redis 롤 기본값. 비밀번호는 group_vars/all/vault.yml(암호화)의 vault_redis_password
+
+redis_image: redis:7.4.9-alpine
+redis_namespace: data
+redis_app_namespace: apps
+
+# 발급 경로(Redis + Kafka)를 둘 노드 = 인벤토리 [queue] 그룹 (worker2). 이유는 docs/redis-kafka.md
+redis_node: "{{ groups['queue'][0] }}"
+redis_data_path: /srv/data/redis
+# 공식 이미지의 redis 사용자 (uid 999, gid 1000)
+redis_uid: 999
+redis_gid: 1000
+redis_data_size: 1Gi
+
+# 메모리: maxmemory는 데이터 상한, limit은 컨테이너 상한.
+# AOF 다시쓰기(rewrite) 때 fork로 잠깐 메모리가 늘어나므로 limit을 maxmemory의 3배로 둔다.
+redis_maxmemory: 64mb
+redis_cpu_request: 50m
+redis_memory_request: 64Mi
+redis_memory_limit: 192Mi

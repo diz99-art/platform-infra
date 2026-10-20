@@ -1,0 +1,23 @@
+# Kafka 배포 플레이북. 실행: cd ansible && ansible-playbook kafka.yml  (멱등)
+# 순서: site.yml → mysql.yml(StorageClass local-static을 만든다) → redis.yml → kafka.yml → coupon.yml
+
+- name: 1) queue 노드에 고정 경로 만들기
+  hosts: queue
+  become: true
+  gather_facts: false
+  tasks:
+    - ansible.builtin.import_role:
+        name: kafka
+        tasks_from: storage
+
+- name: 2) 쿠버네티스에 Kafka 배포 (맥에서 API 서버로)
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ kubeconfig_local_path }}"
+      context: "{{ kubeconfig_context }}"
+  tasks:
+    - ansible.builtin.import_role:
+        name: kafka
+        tasks_from: k8s

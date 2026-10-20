@@ -37,6 +37,7 @@ spec:
             app: mysql-backup
         spec:
           restartPolicy: Never
+          enableServiceLinks: false
           securityContext:
             runAsUser: {{ mysql_uid }}
             runAsGroup: {{ mysql_uid }}

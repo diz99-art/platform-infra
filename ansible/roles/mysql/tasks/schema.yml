@@ -48,7 +48,7 @@
     update_password: "{{ 'always' if mysql_rotate_passwords | bool else 'on_create' }}"
     priv: "{{ item }}.*:{{ mysql_service_privileges }}"
     resource_limits:
-      MAX_USER_CONNECTIONS: "{{ mysql_service_max_connections }}"
+      MAX_USER_CONNECTIONS: "{{ mysql_service_max_connections_overrides[item] | default(mysql_service_max_connections) }}"
     login_host: "{{ mysql_login.login_host }}"
     login_user: "{{ mysql_login.login_user }}"
     login_password: "{{ mysql_login.login_password }}"

@@ -5,8 +5,8 @@ mysql_namespace: data
 # 앱이 쓸 접속 정보 Secret을 만들 네임스페이스 (Secret은 네임스페이스 밖에서 못 읽는다)
 mysql_app_namespace: apps
 
-# 데이터를 둘 노드 = 인벤토리 [data] 그룹의 첫 서버 (worker1)
-mysql_node: "{{ groups['data'][0] }}"
+# 데이터를 둘 노드 = 인벤토리 [mysql] 그룹의 첫 서버 (worker1)
+mysql_node: "{{ groups['mysql'][0] }}"
 
 # 노드의 고정 경로. k3s 폴더(/var/lib/rancher) 밖이라 k3s를 지우고 다시 깔아도 남는다.
 mysql_data_path: /srv/data/mysql
@@ -31,6 +31,11 @@ mysql_databases: [coupon, auth, notification, file]
 # DROP, GRANT OPTION, 다른 DB 권한은 주지 않는다 (최소 권한)
 mysql_service_privileges: SELECT,INSERT,UPDATE,DELETE,CREATE,ALTER,INDEX,REFERENCES,CREATE TEMPORARY TABLES,LOCK TABLES
 mysql_service_max_connections: 25
+# 서비스별로 다르게 줄 때. 계산: (replicas + 롤링 업데이트 maxSurge) × 커넥션 풀 크기 + 여유
+#   coupon: (2 + 1) × 10 + 5 = 35. 25로 두었더니 배포 중 3번째 파드가 연결 상한에 걸려 시작에 실패했다 (docs/coupon.md)
+# 합계는 max_connections(120) 안: 35 + 25 × 3 + 백업 2 = 112
+mysql_service_max_connections_overrides:
+  coupon: 35
 # 백업 계정: 읽기와 덤프에 필요한 것만
 mysql_backup_user: backup
 mysql_backup_privileges: SELECT,SHOW VIEW,TRIGGER,LOCK TABLES,EVENT
