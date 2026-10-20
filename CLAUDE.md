@@ -22,13 +22,14 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림·파일 서버를 운영�
 
 ## 핵심 결정
 
-- VM 3대: cp1(컨트롤 플레인), worker1, worker2. Ubuntu 24.04, Multipass(QEMU)로 만든다.
+- VM 3대: cp1(컨트롤 플레인, 2GB), worker1·worker2(각 4GB). Ubuntu 24.04, Multipass(QEMU)로 만든다. 클러스터를 쓸 때 Docker Desktop은 끈다 (맥 16GB).
 - DB는 MySQL 하나만 클러스터에 두고, 서비스별로 DB와 전용 계정을 나눈다 (coupon, auth, notification, file). 메모리를 아끼기 위해서다.
 - k3s 기본 구성요소(Traefik, ServiceLB, local-path, metrics-server)는 켜둔다. cp1에는 control-plane NoSchedule taint를 건다.
 - 플레이북은 멱등하게 쓴다: 확인용 command에는 changed_when: false, 설치는 when 조건, 서비스 재시작은 핸들러로.
 - 비밀은 Ansible Vault(`group_vars/all/vault.yml`, `vault_` 접두사)에 두고 Ansible이 쿠버네티스 Secret을 만든다. Secret 매니페스트는 저장소에 두지 않는다.
 - MySQL: `data` 네임스페이스 StatefulSet, worker1 고정 경로 PV(Retain). 앱 접속 정보 Secret은 `apps` 네임스페이스의 `mysql-<서비스>`. 서비스 계정은 자기 DB에만 권한(DROP 없음).
-- 메모리 계획은 `docs/memory-plan.md`. 새 구성요소를 넣을 때 이 문서의 예산을 먼저 확인하고 고친다.
+- 메모리 계획은 `docs/memory-plan.md`. 새 구성요소를 넣을 때 이 문서의 예산을 먼저 확인하고, 올린 뒤 실측해서 고친다 (워커 여유 목표 15%, 지금 13%).
+- VM 크기 바꾸기: 한 대씩 `kubectl drain` → `multipass stop` → `multipass set local.<이름>.memory=…` → start → `kubectl uncordon`, `multipass/vms.conf`도 고친다.
 
 ## 명령어
 

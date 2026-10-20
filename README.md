@@ -20,14 +20,14 @@
  │                         CoreDNS, metrics-server, local-path-provisioner
  │                         (Traefik(Ingress)은 워커 중 하나에, ServiceLB는 모든 노드에 뜬다)
  │
- ├── worker1 (2 CPU / 3GB) ── 데이터 계층
+ ├── worker1 (2 CPU / 4GB) ── 데이터 계층
  │       MySQL 8.4 (하나만)          Redis 7     Kafka (KRaft, 1대)
  │       ├─ DB coupon       ← 계정 coupon
  │       ├─ DB auth         ← 계정 auth
  │       ├─ DB notification ← 계정 notification
  │       └─ DB file         ← 계정 file
  │
- └── worker2 (2 CPU / 3GB) ── 애플리케이션 계층
+ └── worker2 (2 CPU / 4GB) ── 애플리케이션 계층
          Gateway ─┬─ 인증 서버
                   ├─ 쿠폰 서버 ──── Redis, Kafka, MySQL(coupon)
                   ├─ 알림 서버
@@ -95,7 +95,7 @@ multipass/update-hosts.sh  # IP가 바뀌었을 때
 
 ### 메모리 설정
 
-- Docker Desktop 메모리를 3GB로 줄인다 (Settings > Resources > Memory). 클러스터 작업 중에는 Docker Desktop을 꺼두는 것이 가장 좋다.
+- Docker Desktop 메모리를 3GB로 줄였다 (Settings > Resources > Memory). 워커를 4GB로 늘린 뒤로는 **클러스터를 쓸 때 Docker Desktop을 끈다** (VM 최대 10GB + macOS 5GB).
 
 ## 2단계: Ansible로 k3s 설치
 
@@ -236,8 +236,9 @@ kubectl apply -f k8s/examples/mysql-client.yaml                      # 앱처럼
 ### 메모리 예산 (자세히: [docs/memory-plan.md](docs/memory-plan.md))
 
 - 실측: cp1 남음 약 740MB(taint로 앱 금지), worker1 MySQL 포함 751MB 사용, worker2 401MB 사용
-- Redis, Kafka, 쿠폰 서버 2개, ArgoCD, 모니터링만 올리면 워커 용량 5912MB 중 4958MB → **들어간다** (여유 16%)
-- 나머지 서비스 4개(Gateway·인증·알림·파일)까지 다 올리면 6750MB → **약 840MB 모자란다** → 워커를 4GB로 늘리거나(추천) 가벼운 도구로 바꿔야 한다
+- 워커 3GB일 때: 전체 계획(서비스 6개, Redis, Kafka, ArgoCD, 모니터링)에 6750MB가 필요한데 용량 5912MB → 약 840MB 부족
+- **워커를 4GB로 늘렸다** (한 대씩 drain → stop → `multipass set local.<이름>.memory=4G` → start → uncordon, MySQL 중단 28초)
+- 지금: 필요 6824MB / 용량 7802MB → **들어간다** (여유 978MB, 13%). 새 구성요소를 올릴 때마다 실측해서 예산표를 고친다
 
 ### 트러블슈팅 (실제로 겪은 것)
 
