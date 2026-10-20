@@ -21,4 +21,4 @@ configMapGenerator:
 # 이미지 태그 = coupon-system의 커밋 해시. coupon-system의 GitHub Actions가 이 줄을 바꿔 push한다 (사람이 고치지 않는다)
 images:
   - name: ghcr.io/diz99-art/coupon-system
-    newTag: 3ccc3e78c24cad26382c0bbba94c87f60d808aa3
+    newTag: 14b7c729ad45d878526cf0e6e872a0c7aa573b08
