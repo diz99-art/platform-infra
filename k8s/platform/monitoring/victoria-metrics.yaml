@@ -71,7 +71,7 @@ spec:
             - -storageDataPath=/storage
             - -retentionPeriod=15d                 # 15일치만 보관
             - -promscrape.config=/config/scrape.yml
-            - -promscrape.config.checkInterval=30s # 설정(ConfigMap)이 바뀌면 30초 안에 다시 읽는다
+            - -promscrape.configCheckInterval=30s # 설정(ConfigMap)이 바뀌면 30초 안에 다시 읽는다
             - -memory.allowedPercent=50            # 캐시에 쓸 메모리 = 컨테이너 limit의 50%
             - -search.latencyOffset=10s            # 방금 들어온 점도 바로 조회되게 (기본 30초 늦게 보여줌)
           ports:

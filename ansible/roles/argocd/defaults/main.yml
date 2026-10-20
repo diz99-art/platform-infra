@@ -27,9 +27,10 @@ argocd_admin_password_mtime: "2026-10-20T00:00:00Z"
 
 # 자원 (docs/memory-plan.md: ArgoCD 600MB 예산)
 # 6단계 조정: 실측 최대(memory.peak) controller 219, repo-server 44, server 60, redis 10 Mi
-# controller는 그대로(앱이 늘면 커짐), 나머지는 최대치의 약 1.6~3배로 줄였다. 합 704 → 576
+# controller는 그대로(앱이 늘면 커짐), server·redis는 최대치의 약 1.6~3배로 줄였다
 argocd_resources:
   controller: { requests: { cpu: 50m, memory: 192Mi }, limits: { memory: 320Mi } }
-  repoServer: { requests: { cpu: 20m, memory: 48Mi }, limits: { memory: 128Mi } }
+  # 128Mi로 줄였다가 OOMKilled: 44Mi는 Kustomize 앱 하나만 렌더링할 때의 최대치였다. Helm 차트 3개(내려받기 + helm template)를 동시에 렌더링하면 훨씬 많이 쓴다
+  repoServer: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 256Mi } }
   server:     { requests: { cpu: 20m, memory: 48Mi }, limits: { memory: 96Mi } }
   redis:      { requests: { cpu: 10m, memory: 16Mi }, limits: { memory: 32Mi } }
