@@ -1,6 +1,8 @@
 # 3단계 설계: MySQL
 
-클러스터에 MySQL 8.4 서버 하나를 두고, 서비스(coupon, auth, notification, file)마다 DB와 전용 계정을 나눈다.
+클러스터에 MySQL 8.4 서버 하나를 두고, 서비스(coupon, auth, notification)마다 DB와 전용 계정을 나눈다.
+
+> 6단계에서 파일 서버를 계획에서 빼며 `file` DB·계정·Secret을 지웠다 (`mysql_removed_databases`: 테이블이 없을 때만 지운다). 아래 3단계 기록의 `file`은 당시 상태다.
 
 ## 구조
 
@@ -24,15 +26,14 @@ k3s 클러스터
  │                                                     ▼
  │                                       맥 ~/platform-backups/mysql (30일 보관)
  └─ namespace apps
-     └─ Secret mysql-coupon, mysql-auth, mysql-notification, mysql-file
+     └─ Secret mysql-coupon, mysql-auth, mysql-notification
           (username, password, database, host, port, jdbc-url) ← 앱 파드가 env로 받는다
 
 MySQL 안
  ├─ DB coupon        ← 계정 coupon        (coupon.* 에만 권한)
  ├─ DB auth          ← 계정 auth
  ├─ DB notification  ← 계정 notification
- ├─ DB file          ← 계정 file
- └─ 계정 backup: 4개 DB 읽기 전용 (SELECT, SHOW VIEW, TRIGGER, LOCK TABLES, EVENT)
+ └─ 계정 backup: 3개 DB 읽기 전용 (SELECT, SHOW VIEW, TRIGGER, LOCK TABLES, EVENT)
 ```
 
 파일 위치:

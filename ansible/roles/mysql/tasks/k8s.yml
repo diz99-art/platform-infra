@@ -70,3 +70,12 @@
 - name: 백업 (PVC, CronJob)
   kubernetes.core.k8s:
     template: backup.yaml.j2
+
+- name: 뺀 DB의 접속 정보 Secret 지우기 ({{ mysql_app_namespace }})
+  kubernetes.core.k8s:
+    kind: Secret
+    name: "mysql-{{ item }}"
+    namespace: "{{ mysql_app_namespace }}"
+    state: absent
+  loop: "{{ mysql_removed_databases }}"
+

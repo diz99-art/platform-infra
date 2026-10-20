@@ -14,7 +14,8 @@ configs:
     # 앱이 한두 개라 동시 처리 수를 줄인다 (기본 20 / 10). 줄이면 메모리와 CPU를 덜 쓴다
     controller.status.processors: 5
     controller.operation.processors: 2
-    # repo-server가 동시에 렌더링(kustomize build, helm template)하는 수. 2개면 Helm 차트 렌더링이 겹쳐 256Mi에서도 OOMKilled → 1
+    # repo-server가 동시에 렌더링(kustomize build, helm template)하는 수. HTTP Helm 저장소를 쓸 때 2개면 256Mi에서도 OOMKilled → 1
+    # (OCI로 바꾼 뒤에도 1로 둔다: 앱이 적어 순서대로 렌더링해도 느리지 않고, 메모리가 튀지 않는다)
     reposerver.parallelism.limit: 1
   secret:
     # 관리자 비밀번호 (bcrypt 해시, vault에 저장). 이걸 주면 무작위 초기 비밀번호 Secret이 만들어지지 않는다

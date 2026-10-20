@@ -5,11 +5,11 @@
 # 계정과 권한(mysql.user, mysql.db)은 DB를 지워도 남으므로 다시 만들 필요가 없다.
 set -euo pipefail
 
-usage() { echo "사용: $0 <coupon|auth|notification|file> <백업 폴더|파일> [-y]" >&2; exit 1; }
+usage() { echo "사용: $0 <coupon|auth|notification> <백업 폴더|파일> [-y]" >&2; exit 1; }
 [[ $# -ge 2 ]] || usage
 db="$1"; src="$2"; yes="${3:-}"
 
-case "$db" in coupon|auth|notification|file) ;; *) echo "모르는 DB: $db" >&2; usage ;; esac
+case "$db" in coupon|auth|notification) ;; *) echo "모르는 DB: $db" >&2; usage ;; esac
 [[ -d "$src" ]] && src="$src/$db.sql.gz"
 [[ -f "$src" ]] || { echo "백업 파일이 없습니다: $src" >&2; exit 1; }
 # 끝까지 온전한 파일인지 먼저 확인 (gzip 검사 + mysqldump 완료 표시)

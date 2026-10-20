@@ -1,6 +1,6 @@
 # 사내 플랫폼 인프라 (platform-infra)
 
-k3s 클러스터에서 쿠폰·인증·Gateway·알림·파일 서버를 운영하는 학습용 사내 플랫폼의 인프라 저장소.
+k3s 클러스터에서 쿠폰·인증·Gateway·알림 서버를 운영하는 학습용 사내 플랫폼의 인프라 저장소.
 
 ## 사용자와 목적
 
@@ -26,13 +26,13 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림·파일 서버를 운영�
 ## 저장소 구성
 
 - `coupon-system` (기존, ~/Projects/coupon-system): 선착순 쿠폰 발급 서버
-- `platform-services`: 인증, Gateway, 알림, 파일 서버
+- `platform-services`: 인증, Gateway, 알림 (파일 서버는 6단계에서 계획에서 뺐다)
 - `platform-infra` (이 저장소): VM, k3s 클러스터, 공용 미들웨어(MySQL 등) 설정
 
 ## 핵심 결정
 
 - VM 3대: cp1(컨트롤 플레인, 2GB), worker1·worker2(각 4GB). Ubuntu 24.04, Multipass(QEMU)로 만든다. 클러스터를 쓸 때 Docker Desktop은 끈다 (맥 16GB).
-- DB는 MySQL 하나만 클러스터에 두고, 서비스별로 DB와 전용 계정을 나눈다 (coupon, auth, notification, file). 메모리를 아끼기 위해서다.
+- DB는 MySQL 하나만 클러스터에 두고, 서비스별로 DB와 전용 계정을 나눈다 (coupon, auth, notification). 메모리를 아끼기 위해서다.
 - k3s 기본 구성요소(Traefik, ServiceLB, local-path, metrics-server)는 켜둔다. cp1에는 control-plane NoSchedule taint를 건다.
 - 플레이북은 멱등하게 쓴다: 확인용 command에는 changed_when: false, 설치는 when 조건, 서비스 재시작은 핸들러로.
 - 비밀은 Ansible Vault(`group_vars/all/vault.yml`, `vault_` 접두사)에 두고 Ansible이 쿠버네티스 Secret을 만든다. Secret 매니페스트는 저장소에 두지 않는다.
@@ -44,7 +44,7 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림·파일 서버를 운영�
 - limit은 실측 최대치(`memory.peak`, VictoriaMetrics의 max_over_time)를 근거로 정한다. 측정 조건이 실제 사용 조건을 대표하는지 먼저 확인한다 (repo-server: Kustomize만 렌더링할 때 값으로 줄였다가 Helm 렌더링에서 OOMKilled).
 - 메모리 위험은 RSS / limit으로 본다 (working set은 파일 캐시 포함).
 - 시험 스크립트에서 `git commit -a`를 쓸 때는 작업 트리가 깨끗한지 먼저 확인한다.
-- 메모리 계획은 `docs/memory-plan.md`. 새 구성요소를 넣을 때 이 문서의 예산을 먼저 확인하고, 올린 뒤 실측해서 고친다 (워커 여유 목표 15%, 전체 계획 limit 합 기준 지금 7%).
+- 메모리 계획은 `docs/memory-plan.md`. 새 구성요소를 넣을 때 이 문서의 예산을 먼저 확인하고, 올린 뒤 실측해서 고친다 (워커 여유 목표 15%).
 - VM 크기 바꾸기: 한 대씩 `kubectl drain` → `multipass stop` → `multipass set local.<이름>.memory=…` → start → `kubectl uncordon`, `multipass/vms.conf`도 고친다.
 
 ## 명령어
@@ -79,4 +79,4 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림·파일 서버를 운영�
 - 4단계: Redis·Kafka, 쿠폰 서버 이전 (완료). `docs/redis-kafka.md`, `docs/coupon.md`
 - 5단계: ArgoCD GitOps (완료). `docs/gitops.md`
 - 6단계: 모니터링·알림, 메모리 조정, 끊김 조사 (완료). `docs/monitoring.md`, `docs/memory-plan.md`
-- 다음: 플랫폼 서비스(Gateway·인증·알림·파일). 메모리 limit 합 여유 7%라 각 서비스는 실측으로 384Mi 안을 목표로. Secret 저장 암호화·NetworkPolicy는 Vault 단계에서
+- 다음: 플랫폼 서비스(Gateway·인증·알림). limit은 미리 정하지 않고 인증 서버를 만들 때 실측해서 정한다 (15% 여유를 지키려면 3개 합 1624Mi 안 = 평균 541Mi, docs/memory-plan.md). Secret 저장 암호화·NetworkPolicy는 Vault 단계에서

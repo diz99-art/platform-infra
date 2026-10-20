@@ -1,12 +1,12 @@
 # platform-infra
 
-맥 한 대 위에 VM 3대로 k3s 클러스터를 만들고, 쿠폰·인증·Gateway·알림·파일 서버를 운영하는 학습용 사내 플랫폼의 인프라 저장소.
+맥 한 대 위에 VM 3대로 k3s 클러스터를 만들고, 쿠폰·인증·Gateway·알림 서버를 운영하는 학습용 사내 플랫폼의 인프라 저장소.
 전부 무료 도구(Multipass, Ansible, k3s)로 만든다.
 
 ## 저장소 구성
 
 - [coupon-system](https://github.com/diz99-art/coupon-system): 선착순 쿠폰 발급 서버 (Spring Boot, Redis, Kafka)
-- platform-services: 인증, Gateway, 알림, 파일 서버 (예정)
+- platform-services: 인증, Gateway, 알림 (예정. 파일 서버는 6단계에서 계획에서 뺐다)
 - platform-infra (이 저장소): VM, k3s 클러스터, 공용 미들웨어 설정
 
 ## 전체 구조
@@ -24,8 +24,7 @@
  │       MySQL 8.4 (하나만)                     쿠폰 서버 1번
  │       ├─ DB coupon       ← 계정 coupon
  │       ├─ DB auth         ← 계정 auth
- │       ├─ DB notification ← 계정 notification
- │       └─ DB file         ← 계정 file
+ │       └─ DB notification ← 계정 notification
  │
  └── worker2 (2 CPU / 4GB) ── 발급 경로
          Redis 7.4 (재고 판정)   Kafka 4.3 (KRaft 1대)   쿠폰 서버 2번   Traefik
@@ -33,8 +32,7 @@
  앱 (stateless, 스케줄러가 노드에 나눠 배치):
          Gateway ─┬─ 인증 서버
                   ├─ 쿠폰 서버 × 2 ─── Redis, Kafka, MySQL(coupon)   ← 4단계에서 이전
-                  ├─ 알림 서버
-                  └─ 파일 서버
+                  └─ 알림 서버
 
  요청 흐름: 브라우저 → 노드 IP:80 (ServiceLB) → Traefik(Ingress) → Gateway → 각 서비스 → MySQL(서비스별 DB)
 ```
@@ -49,7 +47,7 @@
 - [x] 4단계: Redis·Kafka, 쿠폰 서버 이전 (GitHub Actions ARM64 이미지 → GHCR → k3s)
 - [x] 5단계: ArgoCD GitOps (push → 자동 배포, self-heal, Git 롤백)
 - [x] 6단계: 메모리 여유 확보, 모니터링(VictoriaMetrics·Grafana)과 알림, 응답 끊김 조사
-- [ ] 이후: 플랫폼 서비스(Gateway·인증·알림·파일), Vault 단계(Secret 저장 암호화, NetworkPolicy)
+- [ ] 이후: 플랫폼 서비스(Gateway·인증·알림), Vault 단계(Secret 저장 암호화, NetworkPolicy)
 
 ## 1단계: VM과 Ansible 준비
 
@@ -180,6 +178,7 @@ export KUBECONFIG="$HOME/.kube/platform-infra.yaml:$HOME/.kube/config"
 1. 비밀번호 6개를 무작위로 만들어 Ansible Vault로 암호화(`ansible/group_vars/all/vault.yml`). Ansible이 풀어서 쿠버네티스 Secret을 만든다. 평문은 어디에도 파일로 남지 않는다
 2. MySQL 8.4.11을 `data` 네임스페이스에 StatefulSet으로 배포. worker1의 고정 경로 PV(Retain)에 데이터를 둔다
 3. 서비스별 DB 4개(coupon, auth, notification, file)와 자기 DB에만 권한이 있는 전용 계정, 읽기 전용 백업 계정
+   (6단계에서 파일 서버를 계획에서 빼며 `file` DB·계정·Secret을 지웠다. 지금은 3개)
 4. 매일 03:00 백업 CronJob, 맥으로 가져오는 스크립트, 복구 스크립트. 복구 훈련 2번
 
 ### 구조
@@ -387,7 +386,7 @@ ansible-playbook argocd.yml          # 이 뒤로 쿠폰 서버는 ArgoCD가 Git
 
 1. 메모리: 실측 근거로 MySQL·Kafka 768 → 640, Redis 192 → 160. ArgoCD는 Helm 렌더링 때문에 오히려 704 → 768. 쿠폰 서버 516→555Mi 원인 분석
 2. 모니터링을 ArgoCD로 배포: VictoriaMetrics(수집+저장) + Grafana + vmalert + Alertmanager + kube-state-metrics + node-exporter + MySQL·Redis·Kafka exporter
-3. 대시보드 2개를 Git에 (생성 스크립트 + JSON), 알림 규칙 6개 + 단위 테스트, 디스코드 웹훅 준비
+3. 대시보드 2개를 Git에 (생성 스크립트 + JSON), 알림 규칙 8개 + 단위 테스트, 디스코드 알림
 4. Traefik 접근 로그를 켜고 응답 끊김 원인 범위를 좁힘
 5. 맥 절전으로 VM 시계가 51분 늦어진 문제를 찾아 chrony로 고침
 
@@ -408,7 +407,7 @@ cAdvisor·node-exporter·kube-state-metrics·쿠폰 서버(Actuator)·Traefik·e
 VictoriaMetrics (platform, 15일 보관) ──▶ Grafana (/grafana, 대시보드는 Git의 JSON)
         │
         ▼
-vmalert (규칙 6개) ──▶ Alertmanager (/alertmanager) ──▶ 디스코드 웹훅 (vault)
+vmalert (규칙 8개) ──▶ Alertmanager (/alertmanager) ──▶ 디스코드 웹훅 (vault)
 
 ArgoCD: k8s/platform/monitoring (Kustomize) + grafana·kube-state-metrics·node-exporter (Helm), AppProject platform
 Ansible: monitoring.yml = Secret 4개(Grafana 관리자, Alertmanager 설정, exporter 2개) + Traefik 접근 로그
@@ -419,35 +418,36 @@ Ansible: monitoring.yml = Secret 4개(Grafana 관리자, Alertmanager 설정, ex
 - **VictoriaMetrics 단일 실행**: Prometheus와 같은 설정·PromQL에 메모리는 적게. 수집까지 직접 해서 vmagent 없음 (실측 115Mi)
 - **exporter는 별도 Deployment**: MySQL·Redis·Kafka를 재시작하지 않는다
 - **대시보드는 Git의 JSON, sidecar 없이 ConfigMap 직접 마운트**: 화면에서 고친 건 저장되지 않는다. 고치려면 `gen_dashboards.py`
-- **메모리 알림은 RSS / limit**: working set은 파일 캐시까지 세서 Grafana가 늘 95%로 보였다
+- **메모리 알림은 RSS / limit**: working set은 파일 캐시까지 세서 Grafana가 늘 95%로 보였다. Java 앱은 90%(JVM이 힙을 확보해 둠), 힙 사용률(5분 평균 85%)은 따로 알림
+- **Helm 차트는 OCI 레지스트리(ghcr.io)에서**: 차트 목록 전체를 받지 않아 repo-server 렌더링 최대 202 → 60Mi
 - **AppProject platform**: platform 네임스페이스만, ClusterRole만 클러스터 범위, Secret 금지
 - **chrony**: VM이 멈췄다 깨어나도 1~2분 안에 시계를 맞춘다
 
 ### 검증 결과
 
 - 수집 대상 16개 모두 up, 시계열 약 9,800개. 앱 6개 Synced·Healthy
-- 알림: DLT에 시험 메시지 → 71초 뒤 `KafkaDeadLetter` → Alertmanager. 단위 테스트(노드 다운, 재시작, 메모리) 통과
+- 알림: DLT에 시험 메시지 → 71초 뒤 `KafkaDeadLetter` → Alertmanager → 디스코드. 단위 테스트(노드 다운, 재시작, 메모리 일반·Java, 힙 사용률) 통과
 - 응답 끊김: 배포와 무관, 409(chunked) 응답에서만, **맥이 클라이언트일 때만**(클러스터 안·VM에서는 수십만 건 중 0건). Tomcat keep-alive 가설은 A/B 시험으로 기각. 서버는 처리를 마쳐 데이터 문제 없음
 
 ### 메모리 여유율
 
-- 지금 떠 있는 것: limit 합 5200 / 7802MB (여유 33%), 실측 최대 3926
-- 전체 계획(플랫폼 서비스 4개 포함): limit 합 7248 → **여유 7%, 목표 15%에 못 미침**. 실측 기반 27%
-- 15%를 위해: 플랫폼 서비스를 실측해 384Mi 안에 맞추기 + ArgoCD Helm 차트를 OCI로 받아 repo-server 192로 → 6608 (15.3%)
+- 1차 계산: 플랫폼 서비스 4 × 512 추정을 넣으면 limit 합 7248 → 여유 7%로 목표(15%) 미달
+- 후속 결정: **파일 서버를 계획에서 뺌**(MySQL `file` DB·계정·Secret 삭제), **ArgoCD Helm 차트를 OCI로**(repo-server 320 → 128), **플랫폼 서비스 limit은 인증 서버를 만들 때 실측으로**
+- 지금 떠 있는 것: limit 합 5008 / 7802MB (**여유 36%**), 실측 최대 3784
+- 15%를 지키려면 Gateway·인증·알림 3개의 limit 합이 1624Mi(평균 541Mi) 안
 - 쿠폰 서버 555Mi는 누수가 아니라 SerialGC가 힙을 최대 가까이 확보해 두는 것 (힙 밖 186·네이티브 100은 일정)
 
-### 디스코드 알림 (직접 할 일)
+### 디스코드 알림
 
-1. 디스코드 채널 편집 → 연동 → 웹후크 → 새 웹후크 → URL 복사
-2. 맥 터미널에서: `scripts/set-vault-secret.sh vault_discord_webhook_url` (입력이 보이지 않음)
-3. `cd ansible && ansible-playbook monitoring.yml`
-4. 시험 알림 명령은 [docs/monitoring.md](docs/monitoring.md#디스코드-웹훅-설정-직접-할-일)
+- 설정 완료: 시험 알림 → 디스코드 전송 2건, 실패 0 (`alertmanager_notifications_total{integration="discord"}`)
+- 웹훅 바꾸기: 맥 터미널에서 `scripts/set-vault-secret.sh vault_discord_webhook_url` → `cd ansible && ansible-playbook monitoring.yml` ([docs/monitoring.md](docs/monitoring.md#디스코드-웹훅-설정-2026-10-20-설정-완료))
 
 ### 트러블슈팅 (실제로 겪은 것)
 
-- **repo-server OOMKilled**: Helm 차트 렌더링은 Kustomize보다 훨씬 많이 쓴다 → 동시 렌더링 1개 + 320Mi
+- **repo-server OOMKilled**: Helm 차트 렌더링은 Kustomize보다 훨씬 많이 쓴다 → 동시 렌더링 1개 + 320Mi → 후속으로 OCI 레지스트리에서 받아 128Mi
 - **Grafana OOMKilled (192Mi)**: Grafana 13 시작 시 DB 초기화 → 320Mi
 - **VictoriaMetrics CrashLoop**: 플래그 이름 오타. StatefulSet은 고장 난 파드를 새 정의로 바꾸지 않아 직접 삭제
 - **PodRestarted 알림의 pod가 kube-state-metrics로 찍힘**: `honor_labels: true`
 - **모든 발급이 409 `COUPON_NOT_IN_ISSUE_PERIOD`**: VM 시계가 맥 절전으로 51분 늦음 → chrony
 - **시험 스크립트의 `git commit -a`가 다른 수정까지 커밋**: 작업 트리가 깨끗할 때만 돌게 고침
+- 기록: chrony 변경(common 롤 defaults·tasks)의 앞부분이 실수로 커밋 `9fd8253`("끊김 재조사: 롤링 업데이트 4")에 섞여 들어갔다. 나머지는 바로 다음 커밋에 있다

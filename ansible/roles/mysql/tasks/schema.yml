@@ -85,3 +85,44 @@
     login_user: "{{ mysql_login.login_user }}"
     login_password: "{{ mysql_login.login_password }}"
   no_log: true
+
+# ── 계획에서 뺀 DB 정리 (mysql_removed_databases) ──
+- name: 뺀 DB의 테이블 수 확인
+  ansible.mysql.mysql_query:
+    query: "SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = %s"
+    positional_args: ["{{ item }}"]
+    login_host: "{{ mysql_login.login_host }}"
+    login_user: "{{ mysql_login.login_user }}"
+    login_password: "{{ mysql_login.login_password }}"
+  loop: "{{ mysql_removed_databases }}"
+  register: mysql_removed_tables
+  changed_when: false
+  no_log: true
+
+- name: 테이블이 있으면 지우지 않고 멈춘다 (데이터를 잃지 않게)
+  ansible.builtin.assert:
+    that: item.query_result[0][0].n | int == 0
+    fail_msg: "DB {{ item.item }}에 테이블이 있습니다. 백업하고 직접 지운 뒤 다시 실행하세요."
+    quiet: true
+  loop: "{{ mysql_removed_tables.results }}"
+  loop_control: { label: "{{ item.item }}" }
+
+- name: 뺀 DB 지우기
+  ansible.mysql.mysql_db:
+    name: "{{ item }}"
+    state: absent
+    login_host: "{{ mysql_login.login_host }}"
+    login_user: "{{ mysql_login.login_user }}"
+    login_password: "{{ mysql_login.login_password }}"
+  loop: "{{ mysql_removed_databases }}"
+
+- name: 뺀 DB의 계정 지우기
+  ansible.mysql.mysql_user:
+    name: "{{ item }}"
+    host: "%"
+    state: absent
+    login_host: "{{ mysql_login.login_host }}"
+    login_user: "{{ mysql_login.login_user }}"
+    login_password: "{{ mysql_login.login_password }}"
+  loop: "{{ mysql_removed_databases }}"
+

@@ -43,6 +43,7 @@
 - **Grafana 대시보드는 파일(Git)**: sidecar 컨테이너(ConfigMap을 찾아다니는 보조 프로그램, 50~80MB) 없이 ConfigMap을 바로 마운트. 화면에서 고쳐도 저장되지 않는다(`allowUiUpdates: false`). 고치려면 `gen_dashboards.py` → JSON → push
 - **Grafana 저장소 없음 (persistence off)**: 데이터 소스·대시보드를 다 파일로 넣으니 지킬 상태가 없다
 - **Grafana 보기 전용 익명 접속**: 맥 안 사설망 학습용이라 대시보드는 로그인 없이 본다. 수정은 admin 로그인 (비밀번호는 vault의 `vault_grafana_admin_password`)
+- **Helm 차트는 OCI 레지스트리에서**: `ghcr.io/prometheus-community/charts`, `ghcr.io/grafana-community/helm-charts`. HTTP 저장소는 차트 전체 목록(index.yaml)을 받아 해석해야 해서 repo-server가 커졌다. ArgoCD에 OCI 저장소 등록(`enableOCI`)은 Ansible argocd 롤이 한다
 - **Grafana 차트는 grafana-community**: Grafana 공식 Helm 차트는 grafana-community 저장소로 옮겨갔다 (grafana 저장소의 마지막 버전은 Grafana 12.3)
 - **kube-state-metrics는 필요한 객체만**: `secrets`, `configmaps`를 빼서 Secret 목록을 읽는 권한 자체가 없다
 - **메모리 알림은 RSS 기준**: working set은 실행 파일을 읽어 둔 파일 캐시까지 센다. Grafana는 working set 305Mi 중 캐시가 100Mi라 working set 기준이면 늘 95%로 울린다. RSS(돌려받을 수 없는 메모리)는 211Mi = 66%
@@ -54,13 +55,16 @@
 
 ## 알림 규칙 (`k8s/platform/monitoring/alerts.yml`)
 
-- `ContainerMemoryHigh`: 컨테이너 RSS / limit > 85% 5분
+- `ContainerMemoryHigh`: 컨테이너 RSS / limit > 85% 5분 (Java 앱 제외)
+- `JavaContainerMemoryHigh`: Java 앱 RSS / limit > 90% 5분. Java 앱 = JVM 지표(`jvm_memory_max_bytes`)를 내보내는 파드 (Spring 앱).
+  JVM은 최대 힙을 확보해 두고 잘 돌려주지 않아 평소 85% 근처(쿠폰 서버 85~89%)라 기준을 올렸다. Kafka도 JVM이지만 JVM 지표가 없어 85%에 속한다
+- `JvmHeapHigh`: 힙 사용량 ÷ 최대 힙의 **5분 평균** > 85% 10분. GC 직전엔 늘 최대까지 차는 톱니 모양이라 순간값으로는 못 본다 (쿠폰 서버 평소 51~56%)
 - `NodeMemoryHigh`: 노드 사용 메모리 > 85% 5분
 - `PodRestarted`: 최근 10분 안에 컨테이너 재시작
 - `KafkaDeadLetter`: `*.DLT` 토픽에 메시지가 들어옴 (발급 저장이 재시도까지 실패)
 - `NodeDown`: node-exporter에 1분 넘게 접속 안 됨 / `NodeNotReady`: 쿠버네티스가 보는 노드 상태 NotReady 1분
 
-### 디스코드 웹훅 설정 (직접 할 일)
+### 디스코드 웹훅 설정 (2026-10-20 설정 완료)
 
 1. 디스코드에서 알림 받을 서버의 채널 옆 톱니바퀴(채널 편집) → **연동(Integrations)** → **웹후크(Webhooks)** → **새 웹후크**
 2. 이름(예: platform-alert)을 정하고 **웹후크 URL 복사**
@@ -79,6 +83,9 @@
    30초 안에 디스코드에 메시지가 온다 (`group_wait: 30s`)
 
 웹훅 URL은 그 채널에 아무나 글을 쓸 수 있는 열쇠라 비밀이다 → vault에만 두고, 대화창·Git·로그에 남기지 않는다.
+
+설정 결과: 시험 알림을 보내자 `alertmanager_notifications_total{integration="discord"}` 2, 실패 0 (시험 알림 + 이미 울리던 알림 묶음).
+(처음 URL을 대화창에 붙여 넣어 전달했다 → 디스코드에서 웹후크를 새로 만들어 위 3번으로 바꾸는 것을 권한다)
 
 ## 응답 끊김 조사 (4단계의 IncompleteRead)
 
@@ -139,7 +146,7 @@
 
 ## 겪은 문제
 
-- **repo-server OOMKilled (128 → 256Mi에서도)**: 44Mi는 Kustomize 앱 하나만 렌더링할 때의 값이었다. Helm 차트는 저장소 목록(index.yaml, 수십 MB)을 내려받아 해석한다.
+- **repo-server OOMKilled (128 → 256Mi에서도)** → 후속: Helm 차트를 OCI 레지스트리(ghcr.io)에서 받도록 바꿔 렌더링 최대 202 → 60Mi, limit 320 → 128. 44Mi는 Kustomize 앱 하나만 렌더링할 때의 값이었다. Helm 차트는 저장소 목록(index.yaml, 수십 MB)을 내려받아 해석한다.
   동시 렌더링 2개에서는 256Mi도 넘었다 → `reposerver.parallelism.limit: 1` + 320Mi (앱 5개 강제 렌더링 최대 202Mi). **측정 조건이 실제 사용 조건을 대표하는지 먼저 확인할 것**
 - **Grafana OOMKilled (192Mi)**: Grafana 13은 처음 뜰 때 내장 DB 초기화에 메모리를 많이 쓴다 → 320Mi. 자체 알림 엔진·플러그인 자동 설치를 꺼도 RSS 211Mi로 비슷했다
 - **VictoriaMetrics CrashLoop**: 플래그 이름을 틀림(`-promscrape.config.checkInterval` → `-promscrape.configCheckInterval`). 이미지에 `-help`를 돌려 모든 플래그를 확인했다.

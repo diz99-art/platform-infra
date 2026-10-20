@@ -28,13 +28,15 @@ mysql_innodb_buffer_pool_size: 256M
 mysql_max_connections: 120
 
 # 서비스별 DB와 계정. 계정 이름 = DB 이름, 자기 DB에만 권한.
-mysql_databases: [coupon, auth, notification, file]
+mysql_databases: [coupon, auth, notification]
+# 계획에서 뺀 DB (6단계: 파일 서버 제외). 비어 있을 때만 DB·계정·Secret을 지운다 (테이블이 있으면 멈춘다)
+mysql_removed_databases: [file]
 # DROP, GRANT OPTION, 다른 DB 권한은 주지 않는다 (최소 권한)
 mysql_service_privileges: SELECT,INSERT,UPDATE,DELETE,CREATE,ALTER,INDEX,REFERENCES,CREATE TEMPORARY TABLES,LOCK TABLES
 mysql_service_max_connections: 25
 # 서비스별로 다르게 줄 때. 계산: (replicas + 롤링 업데이트 maxSurge) × 커넥션 풀 크기 + 여유
 #   coupon: (2 + 1) × 10 + 5 = 35 (풀 크기는 k8s/apps/coupon/config.env). 25로 두었더니 배포 중 3번째 파드가 연결 상한에 걸려 시작에 실패했다 (docs/coupon.md)
-# 합계는 max_connections(120) 안: 35 + 25 × 3 + 백업 2 = 112
+# 합계는 max_connections(120) 안: 35 + 25 × 2(auth, notification) + 백업 2 + exporter 3 = 90
 mysql_service_max_connections_overrides:
   coupon: 35
 # 백업 계정: 읽기와 덤프에 필요한 것만
@@ -44,7 +46,7 @@ mysql_backup_privileges: SELECT,SHOW VIEW,TRIGGER,LOCK TABLES,EVENT
 # 모니터링 계정 (mysqld_exporter, 6단계): 서버 상태만 본다. 서비스 데이터(coupon.* 등)는 읽을 수 없다
 mysql_exporter_user: exporter
 mysql_exporter_privileges: "*.*:PROCESS,REPLICATION CLIENT/performance_schema.*:SELECT"
-# 합계: 35 + 25 × 3 + 백업 2 + exporter 3 = 115 ≤ max_connections 120
+# 합계: 35 + 25 × 2 + 백업 2 + exporter 3 = 90 ≤ max_connections 120 (파일 서버를 빼서 25 줄었다)
 mysql_exporter_max_connections: 3
 
 # true로 실행하면 vault의 새 비밀번호로 계정 비밀번호를 바꾼다 (-e mysql_rotate_passwords=true)

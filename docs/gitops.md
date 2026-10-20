@@ -85,7 +85,7 @@ k8s/
 - **kubectl과 ArgoCD에 내장**: 따로 설치할 것이 없다
 - **configMapGenerator**: 설정 내용의 해시가 ConfigMap 이름에 붙어(`coupon-config-c5h7m8k6k2`), 설정만 바꿔도 파드가 새로 뜬다. 4단계에서 손으로 만든 config-hash 어노테이션이 필요 없어졌다
 - Helm이 나은 경우: 여러 팀이 같은 차트를 값만 바꿔 재사용하거나(ArgoCD 자체처럼), 남이 만든 소프트웨어를 설치할 때. 그래서 **ArgoCD는 Helm 차트로 설치**하고, **우리 앱은 Kustomize**로 쓴다
-- 플랫폼 서비스 4개가 생기면 `k8s/apps/base`(공통 Deployment 모양) + 서비스별 overlay로 중복을 줄일 수 있다
+- 플랫폼 서비스 3개가 생기면 `k8s/apps/base`(공통 Deployment 모양) + 서비스별 overlay로 중복을 줄일 수 있다
 
 ### 넘겨받기 (Ansible → ArgoCD)
 
