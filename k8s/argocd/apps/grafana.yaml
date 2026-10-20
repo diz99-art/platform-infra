@@ -33,6 +33,10 @@ spec:
             org_role: Viewer
           analytics: { reporting_enabled: false, check_for_updates: false, check_for_plugin_updates: false }
           news: { news_feed_enabled: false }
+          # 알림은 vmalert + Alertmanager가 한다. Grafana 자체 알림 엔진(규칙 평가·상태 저장)은 끈다
+          unified_alerting: { enabled: false }
+          # Grafana 12+는 시작할 때 기본 플러그인 몇 개를 인터넷에서 받아 설치한다. 쓰지 않으므로 끈다 (시작 메모리·시간 절약)
+          plugins: { preinstall_disabled: true }
         datasources:
           datasources.yaml:
             apiVersion: 1

@@ -30,7 +30,8 @@ argocd_admin_password_mtime: "2026-10-20T00:00:00Z"
 # controller는 그대로(앱이 늘면 커짐), server·redis는 최대치의 약 1.6~3배로 줄였다
 argocd_resources:
   controller: { requests: { cpu: 50m, memory: 192Mi }, limits: { memory: 320Mi } }
-  # 128Mi로 줄였다가 OOMKilled: 44Mi는 Kustomize 앱 하나만 렌더링할 때의 최대치였다. Helm 차트 3개(내려받기 + helm template)를 동시에 렌더링하면 훨씬 많이 쓴다
-  repoServer: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 256Mi } }
+  # repo-server 경과: 192 → 128(OOMKilled) → 256(동시 렌더링 2개에서 또 OOMKilled) → 동시 렌더링 1개로 줄이고 측정: 앱 5개 강제 렌더링 최대 202Mi → 320
+  # 44Mi는 Kustomize 앱 하나만 렌더링할 때의 값이었다. Helm 차트는 저장소 목록(index.yaml, 수십 MB)을 내려받아 해석해서 훨씬 많이 쓴다
+  repoServer: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 320Mi } }
   server:     { requests: { cpu: 20m, memory: 48Mi }, limits: { memory: 96Mi } }
   redis:      { requests: { cpu: 10m, memory: 16Mi }, limits: { memory: 32Mi } }
