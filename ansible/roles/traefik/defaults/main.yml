@@ -1,0 +1,14 @@
+# Traefik(k3s가 Helm으로 설치) 설정. HelmChartConfig로 k3s의 기본 값을 덮어쓴다.
+# 라우팅·미들웨어(요청 제한, 보안 헤더 등)는 ArgoCD가 Git의 k8s/apps/gateway로 배포한다 (docs/gateway.md)
+
+traefik_access_log: true
+
+# 요청 ID 플러그인 (files/requestid). 소스를 ConfigMap으로 넣어 Traefik이 시작할 때 읽는다 (인터넷에서 받지 않는다)
+traefik_requestid_module: github.com/diz99-art/requestid
+traefik_request_id_header: X-Request-Id
+
+# 요청 헤더 전체 크기 상한 (본문 크기 상한은 Git의 gateway 미들웨어 body-limit)
+traefik_max_header_bytes: 32768
+
+# 실측해서 정한다 (docs/memory-plan.md)
+traefik_memory: 128Mi

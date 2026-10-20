@@ -1,0 +1,92 @@
+# Gateway 기능 = Traefik 미들웨어 (요청이 앱에 닿기 전에 Traefik이 처리한다). 설계 이유: docs/gateway.md
+# 순서: request-id → security-headers → (경로별 요청 제한) → body-limit
+#   요청 제한을 본문 읽기(body-limit)보다 앞에 둬서, 막을 요청은 본문을 받기 전에 끊는다
+
+# 요청 ID: 로컬 플러그인(ansible/roles/traefik/files/requestid). 없으면 만들고, 응답·백엔드 요청·접근 로그에 같은 값
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: request-id
+spec:
+  plugin:
+    requestid:
+      headerName: X-Request-Id
+---
+# 보안 헤더: 브라우저가 응답을 안전하게 다루게 한다
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: security-headers
+spec:
+  headers:
+    frameDeny: true                    # X-Frame-Options: DENY (다른 사이트가 iframe으로 감싸 클릭을 가로채는 것 방지)
+    contentTypeNosniff: true           # X-Content-Type-Options: nosniff (JSON을 스크립트로 해석하지 않게)
+    referrerPolicy: no-referrer        # 다른 사이트로 갈 때 주소(토큰이 들어 있을 수 있음)를 보내지 않게
+    contentSecurityPolicy: "frame-ancestors 'none'"
+    permissionsPolicy: "camera=(), microphone=(), geolocation=()"
+    customResponseHeaders:
+      X-Powered-By: ""                 # 빈 값 = 응답에서 지운다 (서버 종류를 알리지 않게)
+    # HSTS(Strict-Transport-Security)는 넣지 않는다: 아직 HTTP뿐이라 의미가 없다 (HTTPS 단계에서)
+---
+# 본문 크기 제한: 1MiB 넘는 요청은 413. 우리 API 요청은 수백 바이트 JSON이다
+# buffering은 요청 본문을 다 받은 뒤 백엔드로 보낸다 (느리게 보내는 클라이언트가 앱 스레드를 오래 잡지 못한다)
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: body-limit
+spec:
+  buffering:
+    maxRequestBodyBytes: 1048576
+    memRequestBodyBytes: 1048576
+---
+# 로그인: IP 기준 분당 60회(평균 초당 1회), 한 번에 20회까지 몰려도 됨 → 넘으면 429
+# 계정별 잠금(5회 실패 → 5분, 인증 서버)은 한 계정을 노리는 공격을, 이 제한은 한 IP가 여러 계정을 훑는 공격(크리덴셜 스터핑)을 늦춘다
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: login-per-ip
+spec:
+  rateLimit:
+    average: 60
+    period: 1m
+    burst: 20
+    sourceCriterion:
+      ipStrategy: {}                   # 요청이 온 TCP 주소(RemoteAddr). X-Forwarded-For는 클라이언트가 꾸밀 수 있어 믿지 않는다
+---
+# 회원가입: IP 기준 (계정 대량 생성 방지). 로그인과 같은 값
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: signup-per-ip
+spec:
+  rateLimit:
+    average: 60
+    period: 1m
+    burst: 20
+    sourceCriterion:
+      ipStrategy: {}
+---
+# 그 밖의 /auth (재발급, 내 정보, JWKS, Swagger): IP 기준 초당 20회
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: auth-per-ip
+spec:
+  rateLimit:
+    average: 20
+    burst: 50
+    sourceCriterion:
+      ipStrategy: {}
+---
+# 쿠폰 발급: 토큰 기준 초당 5회, 몰려도 10회. 사람이 누르는 속도보다 훨씬 크고, 매크로(봇)의 연타는 막는다
+# 토큰 = Authorization 헤더 값 전체. 같은 IP(회사·학교 NAT) 뒤의 여러 사용자가 서로 영향을 주지 않는다
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: issue-per-token
+spec:
+  rateLimit:
+    average: 5
+    burst: 10
+    sourceCriterion:
+      requestHeaderName: Authorization

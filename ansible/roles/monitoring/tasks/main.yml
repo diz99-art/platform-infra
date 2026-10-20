@@ -1,4 +1,4 @@
-# [맥에서] 모니터링용 Secret과 Traefik 설정
+# [맥에서] 모니터링용 Secret
 
 - name: Grafana 관리자 Secret
   kubernetes.core.k8s:
@@ -39,7 +39,3 @@
         alertmanager.yml: "{{ lookup('template', 'alertmanager.yml.j2') | b64encode }}"
   no_log: true
   notify: restart alertmanager
-
-- name: Traefik 접근 로그·지표 (HelmChartConfig)
-  kubernetes.core.k8s:
-    template: traefik-config.yaml.j2

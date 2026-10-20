@@ -1,0 +1,5 @@
+# [맥에서] Traefik 설정 (HelmChartConfig). 적용하면 k3s가 helm upgrade → Traefik 파드가 다시 떠서 몇 초 끊긴다 (1대뿐)
+
+- name: Traefik 설정 (접근 로그, 지표, 클라이언트 IP 보존, 요청 ID 플러그인, 메모리)
+  kubernetes.core.k8s:
+    template: traefik-config.yaml.j2

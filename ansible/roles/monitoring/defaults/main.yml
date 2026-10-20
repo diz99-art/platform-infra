@@ -1,7 +1,4 @@
-# 모니터링에서 Ansible이 맡는 부분: Git에 둘 수 없는 Secret, kube-system의 Traefik 설정.
+# 모니터링에서 Ansible이 맡는 부분: Git에 둘 수 없는 Secret. (Traefik 설정은 8단계에서 traefik 역할로 옮겼다)
 # 모니터링 구성요소 자체(VictoriaMetrics, Grafana, vmalert, Alertmanager, exporter)는 ArgoCD가 Git(k8s/platform/)으로 배포한다.
 
 monitoring_namespace: platform
-
-# Traefik 접근 로그 (k3s가 Helm으로 설치한 Traefik의 값을 HelmChartConfig로 덮어쓴다)
-traefik_access_log: true

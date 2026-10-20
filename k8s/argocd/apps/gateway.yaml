@@ -1,0 +1,20 @@
+# Gateway Application. Git의 k8s/apps/gateway = Traefik 라우팅·미들웨어 (apps 네임스페이스)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gateway
+  namespace: platform
+spec:
+  project: apps
+  source:
+    repoURL: https://github.com/diz99-art/platform-infra.git
+    targetRevision: main
+    path: k8s/apps/gateway
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: apps
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+  revisionHistoryLimit: 10

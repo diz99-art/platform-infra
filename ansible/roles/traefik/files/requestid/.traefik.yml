@@ -1,0 +1,6 @@
+displayName: Request ID
+type: middleware
+import: github.com/diz99-art/requestid
+summary: 요청마다 X-Request-Id를 붙인다 (없거나 형식이 틀리면 새로 만든다)
+testData:
+  headerName: X-Request-Id

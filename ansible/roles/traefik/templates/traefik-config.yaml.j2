@@ -1,0 +1,54 @@
+# k3s가 설치한 Traefik(Helm)의 값을 덮어쓴다. k3s는 이 객체를 보고 Traefik을 다시 설치(helm upgrade)한다.
+# 주의: 적용하면 Traefik 파드가 다시 떠서 몇 초 동안 Ingress가 끊긴다 (Traefik이 1대뿐)
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    logs:
+      access:
+        enabled: {{ traefik_access_log | lower }}
+        # 한 줄에 한 요청, JSON (kubectl logs | jq 로 걸러 보기 쉽다)
+        format: json
+        fields:
+          headers:
+            # 요청 헤더는 남기지 않는다 (쿠키·인증 정보가 로그에 남지 않게). 요청 ID만 남긴다 (앱 로그와 이어 보기)
+            defaultmode: drop
+            names:
+              {{ traefik_request_id_header }}: keep
+    deployment:
+      # VictoriaMetrics가 Traefik 지표(요청 수, 응답 코드, 백엔드 오류)를 가져가게 표시
+      podAnnotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+        prometheus.io/path: /metrics
+    service:
+      spec:
+        # Cluster(기본)이면 ServiceLB가 출발지 IP를 노드 쪽 주소(10.42.0.1)로 바꿔서, 모든 외부 사용자가 한 IP로 보인다
+        # → IP 기준 요청 제한이 모두를 한 통에 넣는다. Local은 Traefik이 있는 노드(cp1)로 온 요청만 받고 출발지 IP를 그대로 둔다
+        externalTrafficPolicy: Local
+    additionalArguments:
+      # 헤더 크기 상한 1MiB(기본) → 32KiB. 토큰(약 630자)·쿠키보다 충분히 크고, 거대한 헤더로 메모리를 쓰게 하는 요청을 431로 막는다
+      - "--entryPoints.web.http.maxHeaderBytes={{ traefik_max_header_bytes }}"
+      # X_Request_Id 처럼 다른 헤더(X-Request-Id)로 읽힐 수 있는 이름의 헤더를 지운다 (Traefik이 정한 헤더를 클라이언트가 흉내 내지 못하게)
+      - "--entryPoints.web.http.aliasHeadersStrategy=delete"
+    resources:
+      requests:
+        memory: {{ traefik_memory }}
+      limits:
+        memory: {{ traefik_memory }}
+    experimental:
+      localPlugins:
+        requestid:
+          type: inlinePlugin
+          moduleName: {{ traefik_requestid_module }}
+          mountPath: /plugins-local/src/{{ traefik_requestid_module }}
+          source:
+            .traefik.yml: |
+              {{ lookup('file', 'requestid/.traefik.yml') | indent(14) }}
+            go.mod: |
+              {{ lookup('file', 'requestid/go.mod') | indent(14) }}
+            requestid.go: |
+              {{ lookup('file', 'requestid/requestid.go') | indent(14) }}

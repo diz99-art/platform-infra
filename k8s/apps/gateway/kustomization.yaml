@@ -1,0 +1,7 @@
+# Gateway = Traefik 라우팅(IngressRoute) + 미들웨어. Spring Cloud Gateway 같은 별도 서버는 두지 않는다 (docs/gateway.md)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: apps
+resources:
+  - middlewares.yaml
+  - routes.yaml

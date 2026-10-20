@@ -1,0 +1,12 @@
+# Traefik 설정. 실행: cd ansible && ansible-playbook traefik.yml  (멱등. 바뀌면 Traefik이 다시 뜬다)
+# 라우팅·미들웨어는 Git(k8s/apps/gateway) → ArgoCD. 이 플레이북은 Traefik 프로그램 자체의 설정(정적 설정)만 맡는다
+
+- name: Traefik 설정 (맥에서 API 서버로)
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ kubeconfig_local_path }}"
+      context: "{{ kubeconfig_context }}"
+  roles:
+    - traefik
