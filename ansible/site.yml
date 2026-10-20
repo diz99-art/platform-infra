@@ -1,0 +1,20 @@
+# k3s 클러스터 설치 플레이북. 실행: cd ansible && ansible-playbook site.yml
+# 여러 번 실행해도 안전하다(멱등). 두 번째부터는 바뀐 것만 고친다.
+
+- name: 1) 모든 노드 공통 준비
+  hosts: k3s_cluster
+  become: true          # sudo로 실행
+  roles:
+    - common
+
+- name: 2) cp1에 k3s 서버 설치
+  hosts: control_plane
+  become: true
+  roles:
+    - k3s_server
+
+- name: 3) 워커를 클러스터에 합류
+  hosts: workers
+  become: true
+  roles:
+    - k3s_agent

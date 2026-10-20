@@ -1,0 +1,6 @@
+# {{ ansible_managed }}
+# k3s 에이전트(워커) 설정. 이 주소의 서버에 토큰으로 합류한다.
+
+server: https://{{ k3s_server_ip }}:{{ k3s_api_port }}
+token: {{ hostvars[k3s_server_host]['k3s_token'] }}
+node-ip: {{ ansible_facts['default_ipv4']['address'] }}

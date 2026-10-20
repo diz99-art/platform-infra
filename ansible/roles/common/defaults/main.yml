@@ -1,0 +1,22 @@
+# common 롤의 기본값. group_vars나 -e 로 덮어쓸 수 있다.
+
+common_timezone: Asia/Seoul
+
+common_packages:
+  - curl
+  - ca-certificates
+
+# 커널 업데이트 등으로 재부팅이 필요하면 자동으로 재부팅할지
+common_reboot_if_required: true
+
+# 부팅할 때 자동으로 올릴 커널 모듈
+common_kernel_modules:
+  - overlay        # 컨테이너 이미지의 층(layer)을 겹쳐 보여주는 파일시스템 (containerd가 씀)
+  - br_netfilter   # 브리지를 지나는 파드 간 트래픽도 iptables 규칙을 거치게 함
+
+common_sysctl:
+  net.bridge.bridge-nf-call-iptables: 1    # 브리지 트래픽에 iptables 적용 (Service 규칙이 동작하려면 필요)
+  net.bridge.bridge-nf-call-ip6tables: 1
+  net.ipv4.ip_forward: 1                   # 노드가 패킷을 다른 곳으로 넘겨줄 수 있게 (파드 ↔ 파드, 파드 → 밖)
+  fs.inotify.max_user_instances: 512       # 파일 변경 감시 개수. 파드가 많아지면 기본값(128)이 모자라 "too many open files"가 난다
+  fs.inotify.max_user_watches: 524288

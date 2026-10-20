@@ -1,0 +1,72 @@
+# cp1에 k3s 서버를 설치하고, 에이전트가 쓸 조인 토큰과 맥이 쓸 kubeconfig를 준비한다.
+
+- name: k3s 설정 디렉터리
+  ansible.builtin.file:
+    path: /etc/rancher/k3s
+    state: directory
+    mode: "0755"
+
+- name: k3s 서버 설정 파일
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: /etc/rancher/k3s/config.yaml
+    mode: "0600"
+  notify: restart k3s
+
+- name: 설치된 k3s 버전 확인
+  ansible.builtin.command: /usr/local/bin/k3s --version
+  register: k3s_installed
+  changed_when: false   # 확인만 하는 명령이라 "바뀜"으로 세지 않는다
+  failed_when: false    # 아직 설치 전이면 실패하는 게 정상
+  check_mode: false     # 읽기만 하므로 --check 때도 실제로 실행한다 (안 그러면 결과가 비어 '설치 필요'로 잘못 판단)
+
+- name: k3s 공식 설치 스크립트 내려받기 (설치가 필요할 때만)
+  ansible.builtin.get_url:
+    url: https://get.k3s.io
+    dest: /usr/local/bin/k3s-install.sh
+    mode: "0755"
+  when: k3s_version not in k3s_installed.stdout | default('')
+
+- name: k3s 서버 설치 (없거나 버전이 다를 때만)
+  ansible.builtin.command: /usr/local/bin/k3s-install.sh
+  environment:
+    INSTALL_K3S_VERSION: "{{ k3s_version }}"
+    INSTALL_K3S_EXEC: server
+  register: k3s_install
+  when: k3s_version not in k3s_installed.stdout | default('')
+
+- name: k3s 서비스 켜기, 부팅 시 자동 시작
+  ansible.builtin.systemd:
+    name: k3s
+    state: started
+    enabled: true
+
+# 설정이 바뀌어 재시작이 예약됐다면 지금 재시작한 뒤 다음으로 넘어간다
+- name: 예약된 핸들러 지금 실행
+  ansible.builtin.meta: flush_handlers
+
+- name: cp1 노드가 Ready가 될 때까지 대기
+  ansible.builtin.command: >-
+    /usr/local/bin/k3s kubectl get node {{ inventory_hostname }}
+    -o 'jsonpath={.status.conditions[?(@.type=="Ready")].status}'
+  register: k3s_node_ready
+  until: k3s_node_ready.stdout == "True"
+  retries: 30
+  delay: 5
+  changed_when: false
+  check_mode: false
+
+- name: 조인 토큰 읽기
+  ansible.builtin.slurp:
+    src: /var/lib/rancher/k3s/server/node-token
+  register: k3s_token_file
+  no_log: true
+
+# set_fact: 이 호스트(cp1)의 변수로 저장 → 에이전트 플레이에서 hostvars['cp1'].k3s_token 으로 꺼낸다
+- name: 조인 토큰을 변수로 저장
+  ansible.builtin.set_fact:
+    k3s_token: "{{ k3s_token_file.content | b64decode | trim }}"
+  no_log: true
+
+- name: 맥에서 쓸 kubeconfig 만들기
+  ansible.builtin.import_tasks: kubeconfig.yml

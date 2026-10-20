@@ -1,0 +1,55 @@
+# k3s를 모든 노드에서 완전히 제거한다. 되돌릴 수 없다.
+# 주의: local-path 볼륨(/var/lib/rancher/k3s/storage)도 지워진다 → 나중에 MySQL 데이터도 사라진다.
+# 실행: cd ansible && ansible-playbook k3s-uninstall.yml -e confirm=yes
+# 다시 설치: ansible-playbook site.yml
+# (common 롤의 설정인 커널 모듈·sysctl·시간대는 k3s와 상관없으므로 남겨둔다)
+
+- name: 0) 실행 확인
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: confirm=yes 없이는 멈춘다
+      ansible.builtin.assert:
+        that: confirm | default('') == 'yes'
+        fail_msg: "클러스터가 통째로 지워집니다. 정말이면 -e confirm=yes 를 붙여 실행하세요."
+        quiet: true
+
+# 워커부터 지운다. 서버를 먼저 지우면 워커가 사라진 서버에 계속 재접속을 시도한다.
+- name: 1) 워커에서 k3s 에이전트 제거
+  hosts: workers
+  become: true
+  gather_facts: false
+  tasks:
+    - name: k3s-agent-uninstall.sh 실행 (스크립트가 있을 때만)
+      ansible.builtin.command:
+        cmd: /usr/local/bin/k3s-agent-uninstall.sh
+        removes: /usr/local/bin/k3s-agent-uninstall.sh   # 이 파일이 없으면 이미 지워진 것 → 건너뜀
+    - name: 남은 설정과 설치 스크립트 지우기
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: [/etc/rancher, /usr/local/bin/k3s-install.sh]
+
+- name: 2) cp1에서 k3s 서버 제거
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  tasks:
+    - name: k3s-uninstall.sh 실행 (스크립트가 있을 때만)
+      ansible.builtin.command:
+        cmd: /usr/local/bin/k3s-uninstall.sh
+        removes: /usr/local/bin/k3s-uninstall.sh
+    - name: 남은 설정과 설치 스크립트 지우기
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: [/etc/rancher, /usr/local/bin/k3s-install.sh]
+
+- name: 3) 맥의 kubeconfig 지우기
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: kubeconfig 파일 삭제
+      ansible.builtin.file:
+        path: "{{ kubeconfig_local_path }}"
+        state: absent

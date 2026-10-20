@@ -1,0 +1,66 @@
+# worker를 cp1의 클러스터에 합류시킨다. k3s_server 롤이 먼저 실행돼 토큰이 있어야 한다.
+
+- name: 조인 토큰이 준비됐는지 확인
+  ansible.builtin.assert:
+    that: hostvars[k3s_server_host]['k3s_token'] is defined
+    fail_msg: "토큰이 없습니다. site.yml 전체를 실행하세요 (--limit workers 만으로는 안 됨)"
+    quiet: true
+
+- name: k3s 설정 디렉터리
+  ansible.builtin.file:
+    path: /etc/rancher/k3s
+    state: directory
+    mode: "0755"
+
+- name: k3s 에이전트 설정 파일
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: /etc/rancher/k3s/config.yaml
+    mode: "0600"
+  diff: false   # --diff 출력에 토큰이 찍히지 않게
+  notify: restart k3s-agent
+
+- name: 설치된 k3s 버전 확인
+  ansible.builtin.command: /usr/local/bin/k3s --version
+  register: k3s_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: k3s 공식 설치 스크립트 내려받기 (설치가 필요할 때만)
+  ansible.builtin.get_url:
+    url: https://get.k3s.io
+    dest: /usr/local/bin/k3s-install.sh
+    mode: "0755"
+  when: k3s_version not in k3s_installed.stdout | default('')
+
+# INSTALL_K3S_EXEC=agent → 서비스 이름이 k3s-agent가 된다. 서버 주소와 토큰은 config.yaml에서 읽는다.
+- name: k3s 에이전트 설치 (없거나 버전이 다를 때만)
+  ansible.builtin.command: /usr/local/bin/k3s-install.sh
+  environment:
+    INSTALL_K3S_VERSION: "{{ k3s_version }}"
+    INSTALL_K3S_EXEC: agent
+  register: k3s_install
+  when: k3s_version not in k3s_installed.stdout | default('')
+
+- name: k3s-agent 서비스 켜기, 부팅 시 자동 시작
+  ansible.builtin.systemd:
+    name: k3s-agent
+    state: started
+    enabled: true
+
+- name: 예약된 핸들러 지금 실행
+  ansible.builtin.meta: flush_handlers
+
+# 노드 상태는 API 서버(cp1)에 물어봐야 하므로 cp1에서 실행한다
+- name: 이 워커가 Ready가 될 때까지 대기
+  ansible.builtin.command: >-
+    /usr/local/bin/k3s kubectl get node {{ inventory_hostname }}
+    -o 'jsonpath={.status.conditions[?(@.type=="Ready")].status}'
+  delegate_to: "{{ k3s_server_host }}"
+  register: k3s_node_ready
+  until: k3s_node_ready.stdout == "True"
+  retries: 30
+  delay: 5
+  changed_when: false
+  check_mode: false

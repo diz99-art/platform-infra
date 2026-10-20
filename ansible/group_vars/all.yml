@@ -1,0 +1,15 @@
+# 모든 서버에 공통으로 쓰는 변수. 롤 안의 defaults/main.yml보다 우선한다.
+
+# k3s 버전 고정. 바꾸면 다음 실행 때 그 버전으로 설치(업그레이드)된다.
+# 확인: curl -s https://update.k3s.io/v1-release/channels (stable 채널)
+k3s_version: v1.36.5+k3s1
+
+# 컨트롤 플레인 주소. 인벤토리의 control_plane 그룹 첫 서버(cp1)의 IP를 "팩트"에서 꺼낸다.
+# → IP를 어디에도 직접 적지 않는다. IP가 바뀌면 플레이북을 다시 실행하면 된다.
+k3s_server_host: "{{ groups['control_plane'][0] }}"
+k3s_server_ip: "{{ hostvars[k3s_server_host]['ansible_facts']['default_ipv4']['address'] }}"
+k3s_api_port: 6443
+
+# 맥에 저장할 kubeconfig (Docker Desktop 등 다른 클러스터 설정과 섞이지 않게 따로 둔다)
+kubeconfig_local_path: "{{ lookup('env', 'HOME') }}/.kube/platform-infra.yaml"
+kubeconfig_context: platform-infra

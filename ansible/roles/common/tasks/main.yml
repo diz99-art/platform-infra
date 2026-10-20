@@ -1,0 +1,64 @@
+# 모든 노드를 쿠버네티스가 돌 수 있는 상태로 맞춘다.
+# ansible_facts['...']: 플레이 시작 때 Ansible이 서버에서 모아 온 정보(팩트)
+
+- name: Ubuntu인지 확인
+  ansible.builtin.assert:
+    that: ansible_facts['distribution'] == 'Ubuntu'
+    fail_msg: "이 롤은 Ubuntu용입니다 (현재: {{ ansible_facts['distribution'] }})"
+    quiet: true
+
+- name: 패키지 목록 갱신 후 안전한 업그레이드
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600   # 1시간 안에 갱신했으면 다시 하지 않는다 (멱등성)
+    upgrade: safe
+
+- name: 필요한 패키지 설치
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+
+- name: 재부팅이 필요한지 확인
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: common_reboot_flag
+
+- name: 재부팅 (커널 업데이트 등)
+  ansible.builtin.reboot:
+    reboot_timeout: 300
+  when: common_reboot_if_required and common_reboot_flag.stat.exists
+
+- name: 시간대 설정
+  community.general.timezone:
+    name: "{{ common_timezone }}"
+
+- name: 스왑 끄기 (켜져 있을 때만)
+  ansible.builtin.command: swapoff -a
+  when: ansible_facts['swaptotal_mb'] > 0
+  changed_when: true
+
+- name: 재부팅 후에도 스왑이 켜지지 않게 /etc/fstab의 swap 줄 주석 처리
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s.*)$'
+    replace: '# \1'
+
+- name: 부팅 시 커널 모듈 자동 로드 설정
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/kubernetes.conf
+    content: "{{ common_kernel_modules | join('\n') }}\n"
+    mode: "0644"
+
+- name: 커널 모듈 지금 로드
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ common_kernel_modules }}"
+
+- name: 커널 파라미터(sysctl) 설정
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-kubernetes.conf
+    reload: true
+  loop: "{{ common_sysctl | dict2items }}"

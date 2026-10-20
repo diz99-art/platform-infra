@@ -22,14 +22,17 @@
 
 ### cp1 (2GB): 컨트롤 플레인 + 가벼운 공용 요소
 
-- Ubuntu 기본: 250MB
-- k3s server (API 서버, 스케줄러, 내장 DB, kubelet 포함): 700MB
-- CoreDNS, Traefik(Ingress), metrics-server: 200MB
-- 남는 여유: 약 850MB → 나중에 모니터링(Prometheus·Grafana를 작게) 후보
+- 앱 파드는 taint(`node-role.kubernetes.io/control-plane:NoSchedule`)로 막는다. k3s 기본 구성요소만 뜬다.
+- 2단계 실측 (2026-10-20, `free -m`): used 1216MB, available 738MB
+  - k3s-server 약 980MB (API 서버, 스케줄러, 내장 DB, kubelet 포함), containerd 약 195MB
+  - CoreDNS, metrics-server, local-path-provisioner: 합쳐서 약 160MB
+  - Traefik은 워커에 뜬다 (약 60MB)
+- 남는 여유: 약 740MB (처음 예상 850MB보다 적다). 모니터링을 여기에 둘지는 넣을 때 다시 잰다.
+  Prometheus는 수집 대상이 늘면 메모리가 계속 늘어나므로 워커에 두는 쪽이 안전하다.
 
 ### worker1 (3GB): 데이터 계층
 
-- Ubuntu 기본 + k3s agent: 550MB
+- Ubuntu 기본 + k3s agent: 550MB (2단계 실측: 앱 없이 약 365MB)
 - MySQL 8.4 하나 (DB 4개: coupon, auth, notification, file): 메모리 제한 768MB, innodb_buffer_pool_size 256MB
 - Redis 7 (쿠폰 재고·락): 128MB
 - Kafka 4.x 1대, KRaft (쿠폰 발급 큐): 메모리 제한 768MB, 힙 512MB

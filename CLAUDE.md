@@ -24,6 +24,8 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림·파일 서버를 운영�
 
 - VM 3대: cp1(컨트롤 플레인), worker1, worker2. Ubuntu 24.04, Multipass(QEMU)로 만든다.
 - DB는 MySQL 하나만 클러스터에 두고, 서비스별로 DB와 전용 계정을 나눈다 (coupon, auth, notification, file). 메모리를 아끼기 위해서다.
+- k3s 기본 구성요소(Traefik, ServiceLB, local-path, metrics-server)는 켜둔다. cp1에는 control-plane NoSchedule taint를 건다.
+- 플레이북은 멱등하게 쓴다: 확인용 command에는 changed_when: false, 설치는 when 조건, 서비스 재시작은 핸들러로.
 - 메모리 계획은 `docs/memory-plan.md`. 새 구성요소를 넣을 때 이 문서의 예산을 먼저 확인하고 고친다.
 
 ## 명령어
@@ -34,7 +36,11 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림·파일 서버를 운영�
 - 통신 확인: `multipass/check-network.sh`
 - Ansible 연결 확인: `cd ansible && ansible all -m ping`
 - 접속: `ssh cp1`, `ssh worker1`, `ssh worker2` (전용 키 ~/.ssh/platform_ed25519)
+- k3s 설치·설정 맞추기: `cd ansible && ansible-playbook site.yml` (멱등. 두 번째 실행은 changed=0이어야 한다)
+- k3s 완전 제거: `cd ansible && ansible-playbook k3s-uninstall.yml -e confirm=yes` (클러스터 안의 데이터도 지워진다)
+- kubectl: kubeconfig는 `~/.kube/platform-infra.yaml`, 컨텍스트 `platform-infra` (~/.zshrc의 KUBECONFIG에 등록)
 
 ## 진행 단계
 
-- 1단계: VM과 Ansible 준비 (완료 시 README에 기록)
+- 1단계: VM과 Ansible 준비 (완료)
+- 2단계: Ansible로 k3s v1.36.5+k3s1 설치 (완료). 설계는 `docs/k3s-design.md`, 검증 기록은 `docs/k3s-verification.md`

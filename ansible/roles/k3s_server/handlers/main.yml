@@ -1,0 +1,8 @@
+# 핸들러: 다른 작업이 notify 했을 때만, 플레이 끝(또는 flush_handlers)에 한 번 실행된다.
+# 설정 파일이 실제로 바뀌었을 때만 재시작하므로, 바뀐 게 없으면 서비스가 멈추지 않는다.
+- name: restart k3s
+  ansible.builtin.systemd:
+    name: k3s
+    state: restarted
+  # 이번 실행에서 설치 스크립트가 돌았다면 이미 새 설정으로 시작됐으므로 다시 재시작하지 않는다
+  when: k3s_install is not changed

@@ -1,0 +1,27 @@
+# {{ ansible_managed }}
+# k3s 서버 설정. k3s는 시작할 때 이 파일을 읽는다 (명령줄 옵션과 같은 내용).
+
+# 이 노드의 IP. 팩트(default_ipv4)에서 가져온다.
+node-ip: {{ ansible_facts['default_ipv4']['address'] }}
+
+# API 서버 인증서에 넣을 이름과 IP. 맥에서 https://<cp1 IP>:6443 으로 접속할 때 인증서가 맞아야 한다.
+tls-san:
+  - {{ inventory_hostname }}
+  - {{ ansible_facts['default_ipv4']['address'] }}
+
+# /etc/rancher/k3s/k3s.yaml(관리자 kubeconfig)은 root만 읽게
+write-kubeconfig-mode: "0600"
+{% if k3s_server_taints %}
+
+node-taint:
+{% for taint in k3s_server_taints %}
+  - "{{ taint }}"
+{% endfor %}
+{% endif %}
+{% if k3s_disable %}
+
+disable:
+{% for item in k3s_disable %}
+  - {{ item }}
+{% endfor %}
+{% endif %}

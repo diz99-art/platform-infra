@@ -1,0 +1,74 @@
+# 클러스터 동작 확인용 nginx. 확인이 끝나면 지운다.
+#   배포: kubectl apply -f k8s/examples/nginx-demo.yaml
+#   접속: http://<아무 노드 IP>/   (예: http://192.168.252.2/)
+#   정리: kubectl delete -f k8s/examples/nginx-demo.yaml
+#
+# 요청 흐름: 브라우저 → 노드 IP:80 (ServiceLB) → Traefik(Ingress) → Service nginx-demo → nginx 파드 3개 중 하나
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+# Deployment: "nginx 파드를 항상 3개 유지하라"는 원하는 상태.
+# 파드가 죽거나 지워지면 ReplicaSet이 알아채고 새로 만든다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-demo
+  namespace: demo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx-demo
+  template:
+    metadata:
+      labels:
+        app: nginx-demo
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.29-alpine
+          ports:
+            - containerPort: 80
+          # requests: 스케줄러가 "이 노드에 자리가 있나"를 판단하는 기준
+          # limits: 이 이상 쓰면 컨테이너를 강제 종료(메모리)하거나 느리게(CPU) 한다
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+---
+# Service: 파드 3개 앞에 고정된 이름과 IP를 하나 둔다 (파드 IP는 다시 뜰 때마다 바뀌므로).
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-demo
+  namespace: demo
+spec:
+  selector:
+    app: nginx-demo
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# Ingress: 클러스터 밖의 HTTP 요청을 경로/도메인에 따라 Service로 보내는 규칙. 실제 처리는 Traefik이 한다.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-demo
+  namespace: demo
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nginx-demo
+                port:
+                  number: 80

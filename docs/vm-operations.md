@@ -51,7 +51,16 @@ multipass/update-hosts.sh
 
 호스트 키를 이름(`HostKeyAlias`)으로 기억하므로 IP가 바뀌어도 "호스트 키가 바뀌었다"는 경고는 나지 않는다.
 
-주의: k3s를 설치한 뒤(2단계 이후)에는 노드 IP가 k3s 설정과 인증서에도 들어간다. 그때 IP가 바뀌면 추가 조치가 필요하며 2단계 문서에서 다룬다.
+k3s를 설치한 뒤(2단계 이후)에는 노드 IP가 k3s 설정(`node-ip`, 워커의 `server` 주소), API 서버 인증서(`tls-san`), 맥의 kubeconfig에도 들어간다.
+이 값들은 전부 플레이북이 팩트에서 읽은 IP로 만들므로, update-hosts.sh 다음에 플레이북을 한 번 더 돌린다:
+
+```bash
+multipass/update-hosts.sh
+cd ansible && ansible-playbook site.yml   # 바뀐 설정 파일만 고치고, 그 노드의 k3s만 재시작한다
+kubectl get nodes
+```
+
+아직 실제로 IP가 바뀐 상황에서 해보지는 않았다. 잘 안 되면 마지막 수단으로 `ansible-playbook k3s-uninstall.yml -e confirm=yes && ansible-playbook site.yml` (약 80초, 클러스터 안의 데이터는 사라진다).
 그래서 IP가 자주 바뀌지 않게 VM은 지우지 말고 stop/start로만 쓰는 것이 좋다.
 
 ## IP가 왜 바뀌나
