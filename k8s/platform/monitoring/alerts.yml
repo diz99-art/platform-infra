@@ -1,0 +1,66 @@
+# vmalert 알림 규칙 (Prometheus 규칙 형식). 30초마다 평가해서 조건이 for 동안 계속 맞으면 Alertmanager로 보낸다.
+# 알림 문구의 {{ $labels.x }}, {{ $value }}는 vmalert가 채운다.
+groups:
+  - name: platform
+    rules:
+      # 컨테이너 메모리 85% 초과: 계속 오르면 OOMKilled. working set = 커널이 돌려받을 수 없는 메모리(캐시 일부 제외)
+      - alert: ContainerMemoryHigh
+        expr: |
+          max by (namespace, pod, container) (container_memory_working_set_bytes)
+            / on (namespace, pod, container)
+          max by (namespace, pod, container) (container_spec_memory_limit_bytes > 0)
+          > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) 메모리 {{ $value | humanizePercentage }}"
+          description: "limit의 85%를 5분 넘게 넘었다. 계속 오르면 OOMKilled. 근거와 예산: docs/memory-plan.md"
+
+      # 노드 메모리 85% 초과: 더 오르면 kubelet이 파드를 쫓아낸다(eviction)
+      - alert: NodeMemoryHigh
+        expr: 1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "노드 {{ $labels.node }} 메모리 {{ $value | humanizePercentage }}"
+          description: "노드 사용 메모리가 85%를 5분 넘게 넘었다. free -m의 available을 확인"
+
+      # 컨테이너 재시작 (OOMKilled, liveness 실패, 앱 종료 등)
+      - alert: PodRestarted
+        expr: increase(kube_pod_container_status_restarts_total[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) 재시작"
+          description: "최근 10분 안에 재시작했다. kubectl -n {{ $labels.namespace }} describe pod {{ $labels.pod }} 의 Last State를 본다"
+
+      # Kafka DLT에 메시지가 들어옴: 재시도까지 실패한 발급 저장. 대사 작업이 1분 안에 DB를 채우는지 확인
+      - alert: KafkaDeadLetter
+        expr: sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~".+\\.DLT"}[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka {{ $labels.topic }}에 메시지 {{ $value }}건"
+          description: "발급 저장이 재시도까지 실패했다. 쿠폰 서버 로그의 'DLT'와 대사 보정(coupon_reconcile_corrected_total)을 본다"
+
+      # 노드 다운: node-exporter에 1분 넘게 접속이 안 됨
+      - alert: NodeDown
+        expr: up{job="node-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "노드 {{ $labels.node }} 응답 없음"
+          description: "node-exporter에 1분 넘게 접속하지 못했다. multipass list, ssh {{ $labels.node }}"
+
+      # 쿠버네티스가 보는 노드 상태가 NotReady
+      - alert: NodeNotReady
+        expr: kube_node_status_condition{condition="Ready", status="true"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "노드 {{ $labels.node }} NotReady"
+          description: "kubelet이 API 서버에 상태를 보고하지 못한다. kubectl describe node {{ $labels.node }}"

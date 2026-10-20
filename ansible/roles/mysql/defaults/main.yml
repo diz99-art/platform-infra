@@ -20,7 +20,8 @@ mysql_backup_size: 2Gi
 # 컨테이너 자원. requests는 자리 예약, limits는 상한 (넘으면 OOMKilled)
 mysql_cpu_request: 250m
 mysql_memory_request: 512Mi
-mysql_memory_limit: 768Mi
+# 768 → 640 (6단계): 버퍼 풀 256 고정, 100만 줄 부하 때 anon 최대 403Mi → 640이면 여유 37% (docs/memory-plan.md)
+mysql_memory_limit: 640Mi
 
 # my.cnf (작은 메모리용, docs/mysql.md에 이유)
 mysql_innodb_buffer_pool_size: 256M
@@ -39,6 +40,12 @@ mysql_service_max_connections_overrides:
 # 백업 계정: 읽기와 덤프에 필요한 것만
 mysql_backup_user: backup
 mysql_backup_privileges: SELECT,SHOW VIEW,TRIGGER,LOCK TABLES,EVENT
+
+# 모니터링 계정 (mysqld_exporter, 6단계): 서버 상태만 본다. 서비스 데이터(coupon.* 등)는 읽을 수 없다
+mysql_exporter_user: exporter
+mysql_exporter_privileges: "*.*:PROCESS,REPLICATION CLIENT/performance_schema.*:SELECT"
+# 합계: 35 + 25 × 3 + 백업 2 + exporter 3 = 115 ≤ max_connections 120
+mysql_exporter_max_connections: 3
 
 # true로 실행하면 vault의 새 비밀번호로 계정 비밀번호를 바꾼다 (-e mysql_rotate_passwords=true)
 mysql_rotate_passwords: false

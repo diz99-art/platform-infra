@@ -42,6 +42,33 @@ spec:
     - group: ""
       kind: Secret
 ---
+# 플랫폼 구성요소(모니터링 등)의 울타리. platform 네임스페이스에만, 차트는 정해진 Helm 저장소에서만
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: {{ argocd_namespace }}
+spec:
+  description: 플랫폼 구성요소 (모니터링, platform 네임스페이스)
+  sourceRepos:
+    - {{ argocd_repo_url }}
+{% for repo in argocd_platform_helm_repos %}
+    - {{ repo }}
+{% endfor %}
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: {{ argocd_namespace }}
+  # 노드·파드 목록과 kubelet 지표를 읽으려면 ClusterRole이 필요하다. 그 두 종류만 허용
+  clusterResourceWhitelist:
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+  # Secret은 Ansible이 vault로 만든다 (grafana-admin, alertmanager-config, exporter 접속 정보)
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: Secret
+---
 # 루트 Application (app of apps): Git의 {{ argocd_apps_path }} 폴더에 있는 Application YAML들을 배포한다
 # → 새 앱을 올리려면 그 폴더에 파일 하나를 추가하고 push하면 된다
 apiVersion: argoproj.io/v1alpha1

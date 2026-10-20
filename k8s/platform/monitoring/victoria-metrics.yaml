@@ -1,0 +1,108 @@
+# VictoriaMetrics 단일 실행: 지표 수집(scrape) + 저장 + 조회(PromQL 호환)를 프로세스 하나가 한다.
+# Prometheus보다 같은 지표에 메모리·디스크를 적게 쓴다. vmagent(수집 전용)를 따로 두지 않는다.
+
+# API에서 노드·파드 목록을 읽고, kubelet의 cAdvisor 지표를 가져올 권한
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: victoria-metrics
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: platform-victoria-metrics
+rules:
+  - apiGroups: [""]
+    resources: [nodes, nodes/metrics, pods, services, endpoints]
+    verbs: [get, list, watch]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-victoria-metrics
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: platform-victoria-metrics
+subjects:
+  - kind: ServiceAccount
+    name: victoria-metrics
+    namespace: platform
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: victoria-metrics
+spec:
+  selector:
+    app: victoria-metrics
+  ports:
+    - name: http
+      port: 8428
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: victoria-metrics
+spec:
+  serviceName: victoria-metrics
+  replicas: 1
+  selector:
+    matchLabels:
+      app: victoria-metrics
+  template:
+    metadata:
+      labels:
+        app: victoria-metrics
+    spec:
+      serviceAccountName: victoria-metrics
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000          # PVC(local-path) 폴더를 이 그룹이 쓸 수 있게
+      containers:
+        - name: victoria-metrics
+          image: victoriametrics/victoria-metrics:v1.154.0
+          args:
+            - -storageDataPath=/storage
+            - -retentionPeriod=15d                 # 15일치만 보관
+            - -promscrape.config=/config/scrape.yml
+            - -promscrape.config.checkInterval=30s # 설정(ConfigMap)이 바뀌면 30초 안에 다시 읽는다
+            - -memory.allowedPercent=50            # 캐시에 쓸 메모리 = 컨테이너 limit의 50%
+            - -search.latencyOffset=10s            # 방금 들어온 점도 바로 조회되게 (기본 30초 늦게 보여줌)
+          ports:
+            - name: http
+              containerPort: 8428
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 20
+            failureThreshold: 3
+          volumeMounts:
+            - name: storage
+              mountPath: /storage
+            - name: config
+              mountPath: /config
+      volumes:
+        - name: config
+          configMap:
+            name: victoria-metrics-config
+  # 지표는 잃어도 되는 데이터라 k3s 기본 local-path(동적, Delete)를 쓴다 (MySQL처럼 고정 경로 PV까지는 필요 없다)
+  volumeClaimTemplates:
+    - metadata:
+        name: storage
+      spec:
+        storageClassName: local-path
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 5Gi

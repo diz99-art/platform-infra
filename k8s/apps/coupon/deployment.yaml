@@ -22,6 +22,11 @@ spec:
     metadata:
       labels:
         app: coupon
+      # VictoriaMetrics가 관리 포트의 Actuator 지표(JVM, HTTP, 쿠폰 커스텀 지표)를 가져가게 표시 (k8s/platform/monitoring/scrape.yml의 pods)
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: /actuator/prometheus
     spec:
       # 2대를 서로 다른 노드에 둔다. 노드 하나가 죽어도 1대는 살아 있게.
       # ScheduleAnyway: 노드가 하나뿐인 상황(점검 중)에도 일단 띄운다 (DoNotSchedule이면 Pending으로 남는다)

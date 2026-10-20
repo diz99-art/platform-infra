@@ -13,8 +13,9 @@ redis_gid: 1000
 redis_data_size: 1Gi
 
 # 메모리: maxmemory는 데이터 상한, limit은 컨테이너 상한.
-# AOF 다시쓰기(rewrite) 때 fork로 잠깐 메모리가 늘어나므로 limit을 maxmemory의 3배로 둔다.
+# AOF 다시쓰기(rewrite) 때 fork로 잠깐 메모리가 늘어나므로(최대 약 2배) limit을 maxmemory의 2.5배로 둔다.
 redis_maxmemory: 64mb
 redis_cpu_request: 50m
 redis_memory_request: 64Mi
-redis_memory_limit: 192Mi
+# 192 → 160 (6단계): maxmemory 64 × fork 최대 2배 + 여유. 실측 최대 37Mi (발급 기록 30만 건)
+redis_memory_limit: 160Mi

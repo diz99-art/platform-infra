@@ -1,0 +1,26 @@
+# 모니터링 (Kustomize). ArgoCD Application "monitoring"이 platform 네임스페이스에 적용한다.
+# 같은 네임스페이스에 Helm 차트로 grafana, kube-state-metrics, node-exporter가 따로 뜬다 (k8s/argocd/apps/)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: platform
+
+resources:
+  - victoria-metrics.yaml
+  - alerting.yaml
+  - exporters.yaml
+  - ingress.yaml
+
+configMapGenerator:
+  # 설정이 바뀌면 이름의 해시가 바뀌어 파드가 새로 뜬다 (VictoriaMetrics·vmalert는 30초마다 스스로도 다시 읽는다)
+  - name: victoria-metrics-config
+    files: [scrape.yml]
+  - name: vmalert-rules
+    files: [alerts.yml]
+  # Grafana가 이 이름으로 마운트하므로 해시를 붙이지 않는다. Grafana는 30초마다 파일을 다시 읽는다
+  - name: grafana-dashboards
+    files:
+      - dashboards/platform-overview.json
+      - dashboards/coupon.json
+    options:
+      disableNameSuffixHash: true

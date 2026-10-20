@@ -1,0 +1,8 @@
+# Alertmanager는 설정 파일이 바뀌어도 스스로 다시 읽지 않는다 → 파드를 지우면 Deployment가 새 Secret으로 다시 띄운다.
+# (rollout restart는 파드 템플릿에 어노테이션을 넣어 ArgoCD의 Git 상태와 달라지므로 쓰지 않는다)
+- name: restart alertmanager
+  kubernetes.core.k8s:
+    kind: Pod
+    namespace: "{{ monitoring_namespace }}"
+    label_selectors: [app=alertmanager]
+    state: absent

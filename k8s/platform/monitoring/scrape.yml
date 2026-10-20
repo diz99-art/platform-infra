@@ -1,0 +1,85 @@
+# VictoriaMetrics가 지표를 가져오는(scrape) 대상. Prometheus 설정 형식과 같다.
+# 30초마다 가져온다 (기본 10~15초보다 길게: 저장할 점이 줄어 메모리·디스크를 아낀다)
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+
+scrape_configs:
+  # 자기 자신
+  - job_name: victoria-metrics
+    static_configs:
+      - targets: ["localhost:8428"]
+
+  # 노드마다 kubelet 안에 있는 cAdvisor: 컨테이너별 메모리·CPU (kubectl top보다 자세하다)
+  - job_name: cadvisor
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true     # kubelet 인증서가 노드 IP로 자체 서명되어 있다
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    kubernetes_sd_configs:
+      - role: node                   # 노드 목록을 API에서 받아 노드IP:10250 으로 접속
+    metrics_path: /metrics/cadvisor
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_node_name]
+        target_label: node
+    # cAdvisor는 지표가 아주 많다. 대시보드·알림에 쓰는 것만 남긴다
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: container_(memory_working_set_bytes|memory_rss|memory_cache|spec_memory_limit_bytes|cpu_usage_seconds_total|oom_events_total)
+        action: keep
+      - source_labels: [container]
+        regex: "|POD"                 # 파드 합계 줄과 pause 컨테이너는 버린다 (컨테이너별로 더해서 본다)
+        action: drop
+
+  # 파드 어노테이션 prometheus.io/scrape: "true" 가 붙은 파드 (쿠폰 서버, exporter, Traefik)
+  - job_name: pods
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        regex: "true"
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: Pending|Succeeded|Failed
+        action: drop
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        regex: (.+)
+        target_label: __metrics_path__
+      - source_labels: [__meta_kubernetes_pod_ip, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        regex: (.+);(.+)
+        replacement: $1:$2
+        target_label: __address__
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_pod_node_name]
+        target_label: node
+      # job = 파드의 app 라벨 (쿠폰 서버는 coupon), 없으면 app.kubernetes.io/name (Traefik)
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+        target_label: job
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        regex: (.+)
+        target_label: job
+
+  # Service 어노테이션 prometheus.io/scrape: "true" 가 붙은 서비스 (Helm 차트로 설치한 node-exporter, kube-state-metrics)
+  - job_name: services
+    kubernetes_sd_configs:
+      - role: endpoints
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+        regex: "true"
+        action: keep
+      # 어노테이션에 포트가 있으면 그 포트로, 없으면 endpoint의 원래 주소(파드IP:포트) 그대로
+      - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_endpoint_node_name]
+        target_label: node
+      - source_labels: [__meta_kubernetes_service_name]
+        target_label: job

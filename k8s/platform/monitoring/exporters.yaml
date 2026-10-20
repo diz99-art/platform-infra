@@ -1,0 +1,94 @@
+# MySQL·Redis·Kafka 지표를 Prometheus 형식으로 바꿔 주는 exporter.
+# 데이터 파드에 붙이지(sidecar) 않고 따로 띄운다: MySQL·Redis·Kafka를 재시작하지 않아도 되고, Ansible이 관리하는 data 네임스페이스를 건드리지 않는다.
+# 접속 정보 Secret(mysql-exporter, redis-exporter)은 Ansible이 만든다.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysqld-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: mysqld-exporter }
+  template:
+    metadata:
+      labels: { app: mysqld-exporter }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9104"
+    spec:
+      enableServiceLinks: false
+      securityContext: { runAsNonRoot: true, runAsUser: 65534 }
+      containers:
+        - name: exporter
+          image: prom/mysqld-exporter:v0.20.0
+          args:
+            - --mysqld.address=mysql.data.svc.cluster.local:3306
+            - --mysqld.username=exporter          # 서버 상태만 읽는 계정 (ansible/roles/mysql)
+          env:
+            - name: MYSQLD_EXPORTER_PASSWORD
+              valueFrom: { secretKeyRef: { name: mysql-exporter, key: password } }
+          ports: [{ name: metrics, containerPort: 9104 }]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: redis-exporter }
+  template:
+    metadata:
+      labels: { app: redis-exporter }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9121"
+    spec:
+      enableServiceLinks: false
+      securityContext: { runAsNonRoot: true, runAsUser: 59000 }
+      containers:
+        - name: exporter
+          image: oliver006/redis_exporter:v1.94.0
+          env:
+            - name: REDIS_ADDR
+              value: redis://redis.data.svc.cluster.local:6379
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: redis-exporter, key: password } }
+          ports: [{ name: metrics, containerPort: 9121 }]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: kafka-exporter }
+  template:
+    metadata:
+      labels: { app: kafka-exporter }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9308"
+    spec:
+      enableServiceLinks: false
+      securityContext: { runAsNonRoot: true, runAsUser: 65534 }
+      containers:
+        - name: exporter
+          image: danielqsj/kafka-exporter:v1.10.0
+          args:
+            - --kafka.server=kafka.data.svc.cluster.local:9092
+            - --kafka.version=3.9.0              # Kafka 4는 아주 옛 프로토콜을 지원하지 않는다. 기본값(2.0.0)보다 새 버전으로 말하게 한다
+            - --topic.filter=^coupon.*           # 내부 토픽(__consumer_offsets 등)은 빼서 지표 수를 줄인다
+            - --group.filter=^coupon.*
+          ports: [{ name: metrics, containerPort: 9308 }]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 48Mi }

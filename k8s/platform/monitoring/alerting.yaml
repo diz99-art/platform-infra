@@ -1,0 +1,119 @@
+# 알림: vmalert(규칙 평가) → Alertmanager(묶기·중복 제거·보내기) → 디스코드
+# Alertmanager 설정(웹훅 주소)은 Secret alertmanager-config로 Ansible이 만든다 (ansible/roles/monitoring)
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmalert
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vmalert
+  template:
+    metadata:
+      labels:
+        app: vmalert
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: vmalert
+          image: victoriametrics/vmalert:v1.154.0
+          args:
+            - -rule=/rules/*.yml
+            - -datasource.url=http://victoria-metrics:8428      # 규칙을 평가할 때 조회할 곳
+            - -remoteWrite.url=http://victoria-metrics:8428     # 알림 상태를 저장 → vmalert가 다시 떠도 "5분째 울리는 중"을 기억
+            - -remoteRead.url=http://victoria-metrics:8428
+            - -notifier.url=http://alertmanager:9093/alertmanager
+            - -evaluationInterval=30s
+            - -configCheckInterval=30s                          # 규칙(ConfigMap)이 바뀌면 다시 읽는다
+            - -external.url=http://192.168.252.2/grafana
+          ports:
+            - name: http
+              containerPort: 8880
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 48Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+          volumeMounts:
+            - name: rules
+              mountPath: /rules
+      volumes:
+        - name: rules
+          configMap:
+            name: vmalert-rules
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmalert
+spec:
+  selector:
+    app: vmalert
+  ports:
+    - name: http
+      port: 8880
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager:v0.34.1
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --cluster.listen-address=        # 여러 대 묶기(HA) 끔
+            - --web.route-prefix=/alertmanager
+            - --web.external-url=http://192.168.252.2/alertmanager
+          ports:
+            - name: http
+              containerPort: 9093
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 48Mi }
+          readinessProbe:
+            httpGet: { path: /alertmanager/-/ready, port: http }
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alertmanager
+              readOnly: true
+            - name: storage
+              mountPath: /alertmanager
+      volumes:
+        - name: config
+          secret:
+            secretName: alertmanager-config
+        # 침묵(silence)·보낸 기록. 재시작하면 사라져도 된다
+        - name: storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+spec:
+  selector:
+    app: alertmanager
+  ports:
+    - name: http
+      port: 9093

@@ -1,0 +1,14 @@
+# 모니터링에서 Ansible이 맡는 부분 (Secret, Traefik 설정). 실행: cd ansible && ansible-playbook monitoring.yml  (멱등)
+# 모니터링 구성요소는 ArgoCD가 Git의 k8s/platform/ 으로 배포한다.
+# 순서: ... → argocd.yml → monitoring.yml
+# 디스코드 웹훅을 바꾼 뒤에도 이것만 다시 실행하면 된다 (scripts/set-vault-secret.sh vault_discord_webhook_url)
+
+- name: 모니터링 Secret과 Traefik 설정 (맥에서 API 서버로)
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ kubeconfig_local_path }}"
+      context: "{{ kubeconfig_context }}"
+  roles:
+    - monitoring

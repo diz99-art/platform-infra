@@ -1,0 +1,18 @@
+# 맥 브라우저: http://<노드 IP>/grafana/ , http://<노드 IP>/alertmanager/
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: monitoring
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          - path: /grafana
+            pathType: Prefix
+            backend:
+              service: { name: grafana, port: { number: 80 } }
+          - path: /alertmanager
+            pathType: Prefix
+            backend:
+              service: { name: alertmanager, port: { number: 9093 } }

@@ -9,6 +9,10 @@ argocd_repo_url: https://github.com/diz99-art/platform-infra.git
 argocd_repo_revision: main
 # 루트 Application이 지켜보는 폴더. 여기에 Application YAML을 넣으면 그 앱이 배포된다 (app of apps)
 argocd_apps_path: k8s/argocd/apps
+# AppProject platform이 차트를 받아도 되는 Helm 저장소 (모니터링)
+argocd_platform_helm_repos:
+  - https://prometheus-community.github.io/helm-charts
+  - https://grafana-community.github.io/helm-charts
 
 # 맥 브라우저 주소: http://<노드 IP>/argocd
 argocd_root_path: /argocd
@@ -22,8 +26,10 @@ argocd_reconciliation_jitter: 10s
 argocd_admin_password_mtime: "2026-10-20T00:00:00Z"
 
 # 자원 (docs/memory-plan.md: ArgoCD 600MB 예산)
+# 6단계 조정: 실측 최대(memory.peak) controller 219, repo-server 44, server 60, redis 10 Mi
+# controller는 그대로(앱이 늘면 커짐), 나머지는 최대치의 약 1.6~3배로 줄였다. 합 704 → 576
 argocd_resources:
   controller: { requests: { cpu: 50m, memory: 192Mi }, limits: { memory: 320Mi } }
-  repoServer: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 192Mi } }
-  server:     { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 128Mi } }
-  redis:      { requests: { cpu: 10m, memory: 16Mi }, limits: { memory: 64Mi } }
+  repoServer: { requests: { cpu: 20m, memory: 48Mi }, limits: { memory: 128Mi } }
+  server:     { requests: { cpu: 20m, memory: 48Mi }, limits: { memory: 96Mi } }
+  redis:      { requests: { cpu: 10m, memory: 16Mi }, limits: { memory: 32Mi } }

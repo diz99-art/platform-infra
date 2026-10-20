@@ -1,0 +1,29 @@
+# node-exporter: 노드(VM)의 메모리·CPU·디스크. 노드마다 하나씩 (DaemonSet, cp1 포함)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: node-exporter
+  namespace: platform
+spec:
+  project: platform
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: prometheus-node-exporter
+    targetRevision: 4.60.0
+    helm:
+      valuesObject:
+        fullnameOverride: node-exporter
+        service:
+          annotations:
+            prometheus.io/scrape: "true"
+        # cp1의 taint(control-plane NoSchedule)를 견뎌서 cp1에도 뜬다
+        tolerations:
+          - operator: Exists
+        resources:
+          requests: { cpu: 10m, memory: 16Mi }
+          limits: { memory: 32Mi }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }

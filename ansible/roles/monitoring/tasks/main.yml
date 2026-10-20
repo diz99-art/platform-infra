@@ -1,0 +1,45 @@
+# [맥에서] 모니터링용 Secret과 Traefik 설정
+
+- name: Grafana 관리자 Secret
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata: { name: grafana-admin, namespace: "{{ monitoring_namespace }}" }
+      data:
+        admin-user: "{{ 'admin' | b64encode }}"
+        admin-password: "{{ grafana_admin_password | b64encode }}"
+  no_log: true
+
+# exporter가 MySQL·Redis에 접속할 정보. data 네임스페이스의 Secret은 platform에서 읽을 수 없어 따로 만든다
+- name: exporter 접속 정보 Secret
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata: { name: "{{ item.name }}", namespace: "{{ monitoring_namespace }}" }
+      data:
+        password: "{{ item.password | b64encode }}"
+  loop:
+    - { name: mysql-exporter, password: "{{ mysql_exporter_password }}" }
+    - { name: redis-exporter, password: "{{ redis_password }}" }
+  loop_control: { label: "{{ item.name }}" }
+  no_log: true
+
+- name: Alertmanager 설정 Secret (디스코드 웹훅 포함)
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata: { name: alertmanager-config, namespace: "{{ monitoring_namespace }}" }
+      data:
+        alertmanager.yml: "{{ lookup('template', 'alertmanager.yml.j2') | b64encode }}"
+  no_log: true
+  notify: restart alertmanager
+
+- name: Traefik 접근 로그·지표 (HelmChartConfig)
+  kubernetes.core.k8s:
+    template: traefik-config.yaml.j2

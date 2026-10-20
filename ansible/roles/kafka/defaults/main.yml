@@ -19,7 +19,9 @@ kafka_cluster_id: H0THXD_AQy6pinxlvn3Orw
 kafka_heap: 384m
 kafka_cpu_request: 100m
 kafka_memory_request: 512Mi
-kafka_memory_limit: 768Mi
+# 768 → 640 (6단계): 힙 384 고정 + 힙 밖·스레드 약 130 = 최대 약 515Mi. 실측 최대 541(페이지 캐시 포함, 메모리가 모자라면 돌려받음)
+# 힙은 줄이지 않는다: GC 로그상 젊은 영역 GC 뒤에도 245~256MB가 남고 전체 GC가 아직 없어 실제 필요량을 모른다
+kafka_memory_limit: 640Mi
 
 # 보관: 쿠폰 발급 메시지는 컨슈머가 몇 초 안에 DB에 저장하므로 오래 둘 필요가 없다 (기본 168시간 → 72시간)
 kafka_retention_hours: 72
