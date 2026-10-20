@@ -9,7 +9,6 @@ resources:
   - deployment.yaml
   - service.yaml
   - pdb.yaml
-  - ingress.yaml
 
 # 설정(ConfigMap)을 config.env 파일에서 만든다. 이름 뒤에 내용의 해시가 붙어(coupon-config-abc123)
 # 설정을 바꾸면 Deployment가 가리키는 이름도 바뀌어 파드가 새 설정으로 다시 뜬다

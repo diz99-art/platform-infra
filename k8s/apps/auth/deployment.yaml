@@ -27,6 +27,8 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8081"
         prometheus.io/path: /actuator/prometheus
+        # Secret(DB 비밀번호 등)을 바꾼 뒤 이 숫자를 올려 push → 파드가 새 Secret 값으로 다시 뜬다 (env는 시작할 때만 읽힌다)
+        platform-infra/secret-rev: "1"
         # Secret auth-jwt-keys에 들어 있는 키 id 목록. 앱은 키 파일을 시작할 때 한 번만 읽으므로,
         # 키를 추가·삭제하면 이 값도 바꿔 push한다 → 파드가 다시 떠서 새 키를 읽는다 (키 교체 절차: platform-services의 docs/auth.md)
         platform-infra/jwt-keys: "2026-10-20"

@@ -27,6 +27,8 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8081"
         prometheus.io/path: /actuator/prometheus
+        # Secret(DB 비밀번호 등)을 바꾼 뒤 이 숫자를 올려 push → 파드가 새 Secret 값으로 다시 뜬다 (env는 시작할 때만 읽힌다)
+        platform-infra/secret-rev: "1"
     spec:
       # 2대를 서로 다른 노드에 둔다. 노드 하나가 죽어도 1대는 살아 있게.
       # ScheduleAnyway: 노드가 하나뿐인 상황(점검 중)에도 일단 띄운다 (DoNotSchedule이면 Pending으로 남는다)
