@@ -47,7 +47,8 @@
 - [x] 2단계: Ansible로 k3s 설치
 - [x] 3단계: MySQL (Vault 비밀 관리, StatefulSet, 서비스별 DB·계정, 백업·복구)
 - [x] 4단계: Redis·Kafka, 쿠폰 서버 이전 (GitHub Actions ARM64 이미지 → GHCR → k3s)
-- [ ] 이후: 플랫폼 서비스(Gateway·인증·알림·파일), ArgoCD, 모니터링, Vault 단계(Secret 저장 암호화, NetworkPolicy)
+- [x] 5단계: ArgoCD GitOps (push → 자동 배포, self-heal, Git 롤백)
+- [ ] 이후: 플랫폼 서비스(Gateway·인증·알림·파일), 모니터링, Vault 단계(Secret 저장 암호화, NetworkPolicy)
 
 ## 1단계: VM과 Ansible 준비
 
@@ -274,6 +275,8 @@ GitHub (coupon-system main push) → Actions: test → image(ARM64) → GHCR
 맥: ansible-playbook coupon.yml -e coupon_image_tag=<커밋 해시>
 ```
 
+> 5단계에서 쿠폰 서버 배포는 Ansible(`coupon.yml`)에서 ArgoCD(GitOps)로 바뀌었다. 아래 `coupon.yml`은 4단계 당시 기록.
+
 플레이북: `redis.yml`, `kafka.yml`, `coupon.yml` (롤: `roles/redis`, `roles/kafka`, `roles/coupon`). 순서: `site.yml → mysql.yml → redis.yml → kafka.yml → coupon.yml`
 
 ### 설계 결정 (자세한 이유: [docs/redis-kafka.md](docs/redis-kafka.md), [docs/coupon.md](docs/coupon.md))
@@ -312,3 +315,67 @@ GitHub (coupon-system main push) → Actions: test → image(ARM64) → GHCR
 - **Kafka 명령줄 도구는 브로커 파드 밖에서**: 도구도 JVM이라 브로커 컨테이너 안에서 돌리면 limit 768Mi를 넘을 수 있다 → `kubectl run kcli --image=apache/kafka:4.3.1 ...` 일회용 파드
 - **`runAsNonRoot`인데 이미지가 `USER app`(이름)뿐**: 쿠버네티스가 root인지 확인할 수 없어 거부한다 → 이미지의 uid(100)를 `runAsUser`에 숫자로 적었다
 - **zsh 변수 함정**: `for path in ...`가 PATH를 덮어씀, `$CID:count`의 `:c`가 수정자로 해석됨 → 다른 이름, `${CID}`
+
+## 5단계: GitOps
+
+### 한 일
+
+1. ArgoCD v3.5.5를 `platform` 네임스페이스에 Helm 차트로 설치 (Ansible `argocd.yml`). Dex·알림·ApplicationSet은 끔. 화면 `http://192.168.252.2/argocd/`
+2. 쿠폰 서버 매니페스트를 Ansible 템플릿에서 Kustomize(`k8s/apps/coupon/`)로 옮기고, ArgoCD Application이 배포하게 했다. Ansible `coupon` 롤은 삭제
+3. coupon-system CI에 `deploy` job: 이미지 뒤에 platform-infra의 이미지 태그를 커밋 해시로 바꿔 push (deploy key)
+4. 자동 배포 시간, self-heal, Git 롤백, 배포·롤백 중 발급 부하를 검증
+
+### 구조
+
+```
+coupon-system push ─▶ Actions: test ─▶ image(ARM64 → GHCR) ─▶ deploy(newTag 변경 → platform-infra push)
+                                                                         │
+platform-infra (Git = 원하는 상태)                                       ▼
+  k8s/argocd/apps/coupon.yaml   ◀── 루트 Application "platform-apps" (Ansible이 만듦)
+  k8s/apps/coupon/ (Kustomize)  ◀── Application "coupon" (자동 동기화, prune, selfHeal)
+                                          │ 60초+α마다 Git 확인
+                                          ▼
+                       apps 네임스페이스: Deployment coupon 롤링 업데이트
+
+역할: Ansible = VM·k3s·MySQL·Redis·Kafka·Secret·ArgoCD 자체 / ArgoCD = 앱
+```
+
+### 설계 결정 (자세한 이유: [docs/gitops.md](docs/gitops.md))
+
+- **ArgoCD 최소 구성**: controller·repo-server·server·redis만. Dex(SSO), 알림, ApplicationSet은 쓸 일이 없어 끔. 동시 처리 수도 줄임 → 실측 215Mi
+- **Kustomize (Helm 아님)**: 평범한 YAML, CI가 바꿀 곳이 `images.newTag` 한 줄, kubectl·ArgoCD 내장, configMapGenerator로 설정이 바뀌면 자동 재배포. ArgoCD 자체처럼 남이 만든 소프트웨어는 Helm 차트로 설치
+- **app of apps**: 루트 Application이 `k8s/argocd/apps/`를 본다 → 새 앱은 YAML 하나 추가로 끝
+- **AppProject `apps`**: apps 네임스페이스만, 클러스터 전체 객체 금지, **Secret 금지** (Git에 Secret을 넣어도 배포 거부)
+- **비밀번호는 그대로 Vault → Ansible → Secret**. ArgoCD 관리자 비밀번호도 vault (bcrypt 해시를 한 번 만들어 고정 → 멱등)
+- **deploy key**: CI가 platform-infra에만 쓸 수 있는 SSH 키. PAT보다 범위가 좁고 사람 계정·만료와 무관
+- **감지는 60초 주기 확인**: 클러스터가 NAT 뒤라 GitHub webhook을 받을 수 없다 (기본 120초에서 줄임)
+- **롤백 = git revert**: 자동 동기화 중에는 ArgoCD 화면의 Rollback이 막힌다. Git에 기록이 남는 쪽이 정석
+- coupon-system: 문서만 바뀐 push는 CI를 건너뜀 (`paths-ignore`) → README 수정으로 파드가 다시 뜨지 않게
+
+### 검증 결과
+
+- **push → 클러스터 배포 (사람 손 없음)**: 4분 32초(워크플로 변경), **5분 34초(코드 변경)**. 가장 긴 구간은 테스트 2~3분, ArgoCD 감지는 7~52초
+- **배포 중 발급 부하**: 101,923건 전부 202, 실패 0. DB = Redis 카운터 = 101,923, 재시작 0
+- **self-heal**: `kubectl scale --replicas=1` → 0.85초 뒤 2로, `kubectl delete svc` → 0.7초 뒤 재생성
+- **롤백**: 봇 커밋 `git revert` → 40초에 이전 이미지로(롤백 중 발급 58,965건 전부 202), 롤포워드 32초
+- 멱등성: `site/mysql/redis/kafka/argocd.yml` 다시 실행 changed=0
+
+### 메모리 (자세히: [docs/memory-plan.md](docs/memory-plan.md))
+
+- ArgoCD 215Mi (limit 합 704Mi). 노드: cp1 used 1176 / worker1 1316 / worker2 1595 MB
+- 쿠폰 서버 한 대가 516Mi / 640Mi(81%)까지 올라옴, Kafka 483Mi
+- 전체 계획 limit 합 7504 / 7802MB → **여유 4%**, 실측 기반 예상 **28%**. ArgoCD limit 축소 + 서비스 실측 + VictoriaMetrics로 16%까지 되찾는 안
+
+### 처음부터 다시 만들 때
+
+```bash
+cd ansible
+ansible-playbook site.yml && ansible-playbook mysql.yml && ansible-playbook redis.yml && ansible-playbook kafka.yml
+ansible-playbook argocd.yml          # 이 뒤로 쿠폰 서버는 ArgoCD가 Git을 보고 알아서 배포한다
+```
+
+### 트러블슈팅 (실제로 겪은 것)
+
+- **ArgoCD가 넘겨받은 뒤 옛 ConfigMap이 남음**: Ansible이 만든 `coupon-config`는 ArgoCD가 만든 게 아니라 prune 대상이 아니다 → 직접 삭제
+- **로컬 platform-infra가 원격보다 뒤처짐**: CI 봇이 main에 커밋한다. 작업 전 `git pull --rebase`
+- **zsh에서 `custom-columns=...[0]...`가 `no matches found`**: zsh가 `[0]`을 파일 이름 패턴으로 본다 → 인자를 따옴표로 감싼다

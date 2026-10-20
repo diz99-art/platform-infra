@@ -33,23 +33,26 @@ kubectl uncordon worker2                                           # 다시 배�
 - IP 변화 없음, `check-network.sh` 15개 OK, `site.yml`·`mysql.yml` 모두 changed=0
 - `multipass/vms.conf`도 4G로 고쳤다 (VM을 새로 만들 때 같은 크기가 되도록)
 
-## 실측 (4단계: Redis·Kafka·쿠폰 서버 2대 배포 후, 2026-10-20)
+## 실측 (5단계: ArgoCD 설치 후, 2026-10-20)
 
-VM 안 `free -m` 기준, 쿠폰 발급 약 7만 건 부하를 준 직후. VM의 실제 총량은 커널 몫을 빼고 cp1 1955MB, worker 3901MB다.
+VM 안 `free -m` 기준, 배포 중 발급 부하(약 16만 건)를 준 직후. VM의 실제 총량은 커널 몫을 빼고 cp1 1955MB, worker 3901MB다.
 
-- cp1: used 916MB, available 1039MB (k3s-server 약 1GB. 870~1216MB 사이에서 흔들림)
-- worker1 (MySQL, 쿠폰 서버 1번): used 1184MB, available 2716MB
-- worker2 (Redis, Kafka, 쿠폰 서버 2번, Traefik): used 1368MB, available 2533MB
+- cp1: used 1176MB, available 778MB (k3s-server 약 1GB. 870~1216MB 사이에서 흔들림)
+- worker1: used 1316MB, available 2584MB (MySQL, 쿠폰 서버 1대, ArgoCD controller·repo-server·redis)
+- worker2: used 1595MB, available 2305MB (Redis, Kafka, 쿠폰 서버 1대, ArgoCD server, Traefik)
 - 파드 (cgroup anon = 실제 사용):
-  - 쿠폰 서버 423~494Mi / limit 640Mi (처음 512Mi로는 87%까지 차서 올렸다, docs/coupon.md)
-  - Kafka 423Mi / 768Mi (힙 384m 고정), MySQL 187Mi / 768Mi (100만 줄 넣었을 때 최대 620Mi), Redis 15Mi / 192Mi
-  - kube-system 합계 173Mi (Traefik 127Mi)
-- 스케줄러가 보는 메모리 requests 합: worker1 1152Mi, worker2 1216Mi (고르게 나뉨)
+  - 쿠폰 서버 361·516Mi / limit 640Mi (부하를 많이 받은 쪽이 81%. 4단계 494 → 516으로 조금씩 오름)
+  - Kafka 483Mi / 768Mi (4단계 423 → 483. 힙 384m 고정이라 쓴 만큼 실제 메모리로 채워진다)
+  - MySQL 220Mi / 768Mi (100만 줄 넣었을 때 최대 620Mi), Redis 27Mi / 192Mi (발급 기록 약 30만 건)
+  - ArgoCD: controller 161, repo-server 28, server 22, redis 4 = 215Mi / limit 합 704Mi
+  - kube-system 합계 약 173Mi (Traefik 127Mi)
+- 스케줄러가 보는 메모리 requests 합: worker1 1424Mi, worker2 1280Mi
 
 ## 예산표 (limit 기준 = 최악의 경우)
 
 "측정"은 실제로 잰 값, "추정"은 아직 배포하지 않아 공식 문서·쿠폰 서버 실측을 바탕으로 한 예상치다. 단위 MB.
-상태가 있는 것(MySQL, Redis, Kafka)은 노드에 고정, 나머지는 스케줄러가 requests를 보고 정한다. 아래 배치는 그 예상이다.
+상태가 있는 것(MySQL, Redis, Kafka)은 노드에 고정, 나머지는 스케줄러가 requests를 보고 정한다. 아래 배치는 그 예상이다
+(ArgoCD는 실제로는 두 노드에 나뉘어 떴지만 표에서는 worker2에 몰아 적었다).
 
 ```
 노드 (실제 총량)        구성요소                         예산   근거
@@ -59,42 +62,44 @@ cp1 (1955)              k3s server + 기본 구성요소       1216   측정 최
                                                          남음 약 740
 ───────────────────────────────────────────────────────────────────────────
 worker1 (3901)          OS + k3s agent                    400   측정
-  저장 경로             MySQL                             768   limit (측정 187, 최대 620)
-                        쿠폰 서버 1번                     640   limit (측정 494)
+  저장 경로             MySQL                             768   limit (측정 220, 최대 620)
+                        쿠폰 서버 1번                     640   limit (측정 최대 516)
                         모니터링 (Prometheus 계열)        900   추정
                         플랫폼 서비스 2개 × 512          1024   추정 (쿠폰 서버 실측 기준)
                                                          ────
                                                          3732   남음 169 (4%)
 ───────────────────────────────────────────────────────────────────────────
 worker2 (3901)          OS + k3s agent + Traefik          444   측정
-  발급 경로             Redis                             192   limit (측정 15)
-                        Kafka                             768   limit (측정 423)
-                        쿠폰 서버 2번                     640   limit (측정 423)
-                        ArgoCD (최소 구성)                600   추정
+  발급 경로             Redis                             192   limit (측정 27)
+                        Kafka                             768   limit (측정 483)
+                        쿠폰 서버 2번                     640   limit (측정 최대 516)
+                        ArgoCD                            704   limit 합 (측정 215)   ← 추정 600에서 변경
                         플랫폼 서비스 2개 × 512          1024   추정
                                                          ────
-                                                         3668   남음 233 (6%)
+                                                         3772   남음 129 (3%)
 ───────────────────────────────────────────────────────────────────────────
-워커 합계 (limit)       필요 7400 / 용량 7802 → 남음 402 (5%)
+워커 합계 (limit)       필요 7504 / 용량 7802 → 남음 298 (4%)
 ```
 
-3단계 계획(6824)에서 바뀐 것: 쿠폰 서버 512 → 640 (× 2), 다른 Spring 서비스 448 → 512 (× 4), Redis 128 → 192 (AOF 다시쓰기 fork 몫). +576MB.
+바뀐 것: 3단계 계획 6824 → 4단계 7400 (쿠폰 서버 512→640 × 2, 다른 Spring 서비스 448→512 × 4, Redis 128→192) → 5단계 7504 (ArgoCD 추정 600 → limit 합 704).
 
 ### 세 가지 기준으로 다시 본 여유율
 
-- **limit 합 (모두가 동시에 상한까지 쓰는 최악의 경우)**: 7400 / 7802 → **여유 5%**. 목표(15%)보다 적다
-- **실측 기반 예상 (부하 직후 수준)**: OS·k3s 844 + MySQL 620 + Redis 20 + Kafka 500 + 쿠폰 2 × 500 + 다른 서비스 4 × 420 + ArgoCD 500 + 모니터링 700 = 5864 / 7802 → **여유 25%**
-- **requests 합 (스케줄러가 파드를 놓을 때 보는 값)**: 지금 worker1 1152Mi, worker2 1216Mi. 전부 올려도 노드당 약 2.8GB로 allocatable(약 3.9GB) 안 → 배치는 된다
+- **limit 합 (모두가 동시에 상한까지 쓰는 최악의 경우)**: 7504 / 7802 → **여유 4%**. 목표(15%)보다 적다
+- **실측 기반 예상 (부하 직후 수준)**: OS·k3s 844 + MySQL 620 + Redis 30 + Kafka 490 + 쿠폰 2 × 520 + 다른 서비스 4 × 420 + ArgoCD 220 + 모니터링 700 = 5624 / 7802 → **여유 28%**
+- **requests 합 (스케줄러 기준)**: 지금 worker1 1424Mi, worker2 1280Mi. 전부 올려도 노드당 약 2.9GB로 allocatable(약 3.9GB) 안 → 배치는 된다
 
 ## 판단
 
 - 쿠버네티스에서 limit 합이 용량에 가까운 것(오버커밋) 자체는 흔하다. 모든 파드가 동시에 상한까지 쓰는 일은 드물다
 - 하지만 노드의 available이 300MB 아래로 떨어지면 kubelet이 파드를 쫓아내기(eviction) 시작한다. 지금 계획은 최악의 경우 그 근처까지 간다
 - 그래서 다음을 지킨다
-  - 새 서비스는 **올린 뒤 실측해서 limit을 정한다**. 쿠폰 서버보다 라이브러리가 적은 서비스는 400~450MB로 충분할 가능성이 크다 (예상: 4 × 60 = 약 240MB 절약)
-  - Kafka limit 768 → 640 후보 (힙 384 고정, 실측 423): 약 128MB 절약. 부하를 더 준 뒤 결정
-  - 모니터링을 Prometheus 대신 VictoriaMetrics + Grafana로 하는 안 (약 500MB 절약)
-  - 위 셋을 다 하면 limit 합 약 6530 → 여유 16%
+  - 새 서비스는 **올린 뒤 실측해서 limit을 정한다**. 쿠폰 서버보다 라이브러리가 적은 서비스는 400~450MB로 충분할 가능성이 크다 (4 × 60 = 약 240MB 절약)
+  - ArgoCD limit 704 → 약 500 후보 (실측 215, repo-server의 렌더링 순간 최대치를 재 본 뒤): 약 200MB 절약
+  - 모니터링을 Prometheus 대신 VictoriaMetrics + Grafana로 하는 안: 약 500MB 절약
+  - ~~Kafka limit 768 → 640~~: 실측이 423 → 483으로 올라 보류 (640이면 75%)
+  - 위 셋을 다 하면 limit 합 약 6560 → 여유 16%
+- 쿠폰 서버는 부하를 받을수록 조금씩 올라간다(494 → 516). 모니터링을 올린 뒤 시간에 따른 추이를 보고 640Mi가 충분한지 다시 판단한다
 - 노드 available은 `free -m`, 파드 실제 사용은 cgroup `memory.stat`의 anon으로 본다. `kubectl top`은 캐시가 섞여 들쭉날쭉하다
 
 ## MySQL을 하나만 두는 이유

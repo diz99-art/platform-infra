@@ -1,5 +1,8 @@
 # 4단계: 쿠폰 서버 쿠버네티스 이전
 
+> 5단계부터 배포 방식이 바뀌었다: Ansible `coupon.yml`과 `roles/coupon`은 지우고, 같은 매니페스트를 `k8s/apps/coupon/`(Kustomize)로 옮겨 ArgoCD가 배포한다 ([gitops.md](gitops.md)).
+> 아래의 설계(무중단, probe, JVM, 자원)는 그대로 유효하고, `coupon.yml` 명령은 당시 기록이다.
+
 [coupon-system](https://github.com/diz99-art/coupon-system)을 `apps` 네임스페이스에 2대로 띄운다. 이미지는 GitHub Actions가 만든다 (맥의 Docker는 쓰지 않는다).
 
 ## 전체 흐름
