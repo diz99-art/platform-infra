@@ -27,6 +27,8 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8081"
         prometheus.io/path: /actuator/prometheus
+        # 배포 중 부하 시험용으로 파드 템플릿만 바꾼다 (7단계). 값을 바꾸면 롤링 업데이트가 일어난다
+        platform-infra/rollout-drill: "1"
     spec:
       # 2대를 서로 다른 노드에 둔다. 노드 하나가 죽어도 1대는 살아 있게.
       # ScheduleAnyway: 노드가 하나뿐인 상황(점검 중)에도 일단 띄운다 (DoNotSchedule이면 Pending으로 남는다)
