@@ -64,6 +64,9 @@ scrape_configs:
 
   # Service 어노테이션 prometheus.io/scrape: "true" 가 붙은 서비스 (Helm 차트로 설치한 node-exporter, kube-state-metrics)
   - job_name: services
+    # kube-state-metrics의 지표에는 원래 namespace·pod 라벨(대상 파드)이 있다. 아래에서 붙이는 namespace·pod(= kube-state-metrics 자신)와
+    # 이름이 겹치면 기본은 수집 쪽이 이겨서 원래 값이 exported_pod로 밀려난다 → 지표의 원래 라벨을 우선한다
+    honor_labels: true
     kubernetes_sd_configs:
       - role: endpoints
     relabel_configs:
