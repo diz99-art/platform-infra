@@ -6,7 +6,7 @@
 ## 저장소 구성
 
 - [coupon-system](https://github.com/diz99-art/coupon-system): 선착순 쿠폰 발급 서버 (Spring Boot, Redis, Kafka)
-- platform-services: 인증, Gateway, 알림 (예정. 파일 서버는 6단계에서 계획에서 뺐다)
+- [platform-services](https://github.com/diz99-art/platform-services): 인증 서버(7단계), Gateway·알림 (예정. 파일 서버는 6단계에서 계획에서 뺐다)
 - platform-infra (이 저장소): VM, k3s 클러스터, 공용 미들웨어 설정
 
 ## 전체 구조
@@ -30,7 +30,7 @@
          Redis 7.4 (재고 판정)   Kafka 4.3 (KRaft 1대)   쿠폰 서버 2번   Traefik
 
  앱 (stateless, 스케줄러가 노드에 나눠 배치):
-         Gateway ─┬─ 인증 서버
+         Gateway ─┬─ 인증 서버 × 2 ─── MySQL(auth), Redis   ← 7단계 (JWT 발급, 공개키 JWKS)
                   ├─ 쿠폰 서버 × 2 ─── Redis, Kafka, MySQL(coupon)   ← 4단계에서 이전
                   └─ 알림 서버
 
@@ -47,7 +47,8 @@
 - [x] 4단계: Redis·Kafka, 쿠폰 서버 이전 (GitHub Actions ARM64 이미지 → GHCR → k3s)
 - [x] 5단계: ArgoCD GitOps (push → 자동 배포, self-heal, Git 롤백)
 - [x] 6단계: 메모리 여유 확보, 모니터링(VictoriaMetrics·Grafana)과 알림, 응답 끊김 조사
-- [ ] 이후: 플랫폼 서비스(Gateway·인증·알림), Vault 단계(Secret 저장 암호화, NetworkPolicy)
+- [x] 7단계: 인증 서버(RS256 JWT + JWKS), 쿠폰 서버가 토큰으로 사용자 확인
+- [ ] 이후: Gateway·알림, Vault 단계(Secret 저장 암호화, NetworkPolicy)
 
 ## 1단계: VM과 Ansible 준비
 
@@ -451,3 +452,55 @@ Ansible: monitoring.yml = Secret 4개(Grafana 관리자, Alertmanager 설정, ex
 - **모든 발급이 409 `COUPON_NOT_IN_ISSUE_PERIOD`**: VM 시계가 맥 절전으로 51분 늦음 → chrony
 - **시험 스크립트의 `git commit -a`가 다른 수정까지 커밋**: 작업 트리가 깨끗할 때만 돌게 고침
 - 기록: chrony 변경(common 롤 defaults·tasks)의 앞부분이 실수로 커밋 `9fd8253`("끊김 재조사: 롤링 업데이트 4")에 섞여 들어갔다. 나머지는 바로 다음 커밋에 있다
+
+## 7단계: 인증
+
+### 한 일
+
+1. [platform-services](https://github.com/diz99-art/platform-services) 저장소(Gradle 멀티 모듈)에 인증 서버(auth): 회원가입·로그인·재발급·로그아웃·내 정보, BCrypt, 5회 실패 잠금, USER·ADMIN
+2. 액세스 토큰 JWT(RS256, 15분) + 리프레시 토큰(Redis, 14일, 재발급 시 교체). 공개키는 JWKS(`/auth/.well-known/jwks.json`)
+3. 서명 개인키는 Ansible Vault → Secret(`auth-jwt-keys`), 관리자 계정도 vault → Secret(`auth-admin`) (`ansible-playbook auth.yml`)
+4. 쿠폰 서버를 OAuth2 리소스 서버로: JWKS 공개키로 검증, 생성·수정 ADMIN, 발급은 토큰의 사용자로
+5. 배포: ArgoCD Application `auth`(app of apps에 YAML 하나), Ingress `/auth`, CI(test → ARM64 이미지 → 태그 변경)
+6. 메모리 실측으로 auth 512Mi(힙 160m), 쿠폰 서버 640 → 704Mi
+
+### 구조
+
+```
+platform-services push → Actions: test(Testcontainers) → image(ARM64) → deploy(platform-infra k8s/apps/auth newTag)
+                                                                                │ ArgoCD
+                                                                                ▼
+맥 ─ /auth/login ─▶ Traefik ─▶ auth × 2 (apps) ─▶ MySQL auth DB, Redis(auth:*)
+                                  │ /etc/auth/keys/<kid>.pem ◀ Secret auth-jwt-keys ◀ Ansible ◀ vault
+맥 ─ /coupons/{id}/issue (Bearer) ─▶ coupon × 2 ─ JWKS(클러스터 안 http://auth.apps.svc.cluster.local/auth/.well-known/jwks.json)
+```
+
+### 설계 결정 (자세한 이유: [platform-services docs/auth.md](https://github.com/diz99-art/platform-services/blob/main/docs/auth.md))
+
+- **RS256(비대칭) + JWKS**: 다른 서비스는 공개키로 검증만 하고 토큰을 만들 수 없다. HS256(대칭)이면 검증하는 모든 서비스가 위조 가능한 비밀 키를 갖게 된다
+- **키 교체**: 키 두 개를 함께 두는 기간(JWKS 캐시 5분, 토큰 수명 15분) → 활성 키 id는 Git(`AUTH_JWT_ACTIVE_KID`), 키 목록은 파드 어노테이션 `platform-infra/jwt-keys`
+- **리프레시 토큰**: Redis에 해시로, 재발급 시 교체, 재사용이면 전부 폐기
+- **발급 userId = 토큰의 sub**: 본문 userId를 믿으면 남의 id로 쿠폰을 가로챌 수 있다
+- **Secret 파일 권한**: 0440 + fsGroup 101 (앱 사용자만 개인키를 읽는다)
+- **DB 연결 상한**: auth 계정 35 (replicas 2 + maxSurge 1) × 풀 10 + 여유
+
+### 검증 결과
+
+- 전체 흐름: 회원가입 201 → 로그인 → `/me` → 토큰으로 발급 202 (본문의 남의 userId는 무시)
+- 거부: 토큰 없음·만료·변조·다른 키·다른 iss·다른 aud·`alg: none` → 401, USER의 쿠폰 생성·남의 내역 → 403
+- **배포 중 부하**(클러스터 안): auth·coupon 동시 롤링 업데이트 동안 발급 39,480건·로그인 4,365건 **실패 0**
+- 디스코드 알림: 인증 파드가 JVM 지표로 자동으로 Java 규칙에 들어갔고, 첫 배포의 재시작이 `PodRestarted`로 디스코드에 갔다
+- 테스트: platform-services 23개, coupon-system 67개 CI 통과
+
+### 메모리 (자세히: [docs/memory-plan.md](docs/memory-plan.md))
+
+- auth: RSS 최대 354MiB → 힙 160m + 512Mi. 쿠폰 서버: Spring Security로 힙 밖 +47MiB → 704Mi
+- limit 합 6160 / 7802MB (여유 21%). **남은 예산 472MiB로는 Gateway·알림을 각 2대씩 못 올린다** → 선택지는 memory-plan의 "판단"
+
+### 트러블슈팅 (실제로 겪은 것)
+
+- **`POST /auth/logout` → 302**: Spring Security 기본 로그아웃 필터 → `.logout(disable)` (CI 통합 테스트가 발견)
+- **auth 시작 실패 `AccessDeniedException`(키 파일)**: Secret 0400 + root 소유 → fsGroup 101 + 0440
+- **쿠폰 테스트 "없는 주소 404"가 401**: 인증 전에는 주소 존재 여부를 알려주지 않는 게 맞아 테스트를 바꿨다(로그인하면 404)
+- **쿠폰 서버 RSS 93%**: 보안 라이브러리로 Metaspace·코드 캐시 증가 → 704Mi, 힙 `-Xmx`로 고정
+- **인증 전 시험 데이터의 userId가 실제 계정 id와 겹침**: 예전 부하 시험에서 넣은 userId 1, 2, 3…의 발급 기록이 이제 그 id의 실제 사용자 "내 발급 내역"에 보인다

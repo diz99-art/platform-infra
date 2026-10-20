@@ -26,7 +26,7 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림 서버를 운영하는 �
 ## 저장소 구성
 
 - `coupon-system` (기존, ~/Projects/coupon-system): 선착순 쿠폰 발급 서버
-- `platform-services`: 인증, Gateway, 알림 (파일 서버는 6단계에서 계획에서 뺐다)
+- `platform-services` (~/Projects/platform-services): 인증(auth), 이후 Gateway, 알림 (파일 서버는 6단계에서 계획에서 뺐다)
 - `platform-infra` (이 저장소): VM, k3s 클러스터, 공용 미들웨어(MySQL 등) 설정
 
 ## 핵심 결정
@@ -67,6 +67,7 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림 서버를 운영하는 �
 - CI(github-actions[bot])가 platform-infra main에 커밋한다 → 작업 전에 `git pull --rebase`
 - 모니터링: Grafana http://192.168.252.2/grafana/ , Alertmanager /alertmanager/. 구성요소는 ArgoCD(`k8s/platform/monitoring`, Helm 앱 3개), Secret·Traefik 설정은 `ansible-playbook monitoring.yml`
 - 대시보드 수정: `k8s/platform/monitoring/dashboards/gen_dashboards.py` 고치고 실행 → JSON까지 커밋. 알림 규칙 수정 뒤 `scripts/test-alerts.sh`
+- 인증 서버 Secret(서명 키, 관리자): `ansible-playbook auth.yml`. 앱은 platform-services 저장소 → ArgoCD(`k8s/apps/auth`). 키 교체 절차는 platform-services의 docs/auth.md
 - vault 값 넣기(화면에 안 보이게): `scripts/set-vault-secret.sh <키>` (예: vault_discord_webhook_url)
 - 오래 걸리는 시험 전에는 맥이 잠들지 않게 `caffeinate -is -t 7200`. 맥이 잠들면 VM이 멈춘다 (chrony가 깨어난 뒤 시계를 맞춘다)
 - kubectl: kubeconfig는 `~/.kube/platform-infra.yaml`, 컨텍스트 `platform-infra` (~/.zshrc의 KUBECONFIG에 등록)
@@ -79,4 +80,5 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림 서버를 운영하는 �
 - 4단계: Redis·Kafka, 쿠폰 서버 이전 (완료). `docs/redis-kafka.md`, `docs/coupon.md`
 - 5단계: ArgoCD GitOps (완료). `docs/gitops.md`
 - 6단계: 모니터링·알림, 메모리 조정, 끊김 조사 (완료). `docs/monitoring.md`, `docs/memory-plan.md`
-- 다음: 플랫폼 서비스(Gateway·인증·알림). limit은 미리 정하지 않고 인증 서버를 만들 때 실측해서 정한다 (15% 여유를 지키려면 3개 합 1624Mi 안 = 평균 541Mi, docs/memory-plan.md). Secret 저장 암호화·NetworkPolicy는 Vault 단계에서
+- 7단계: 인증 서버(platform-services), 쿠폰 서버 JWT 검증 (완료). platform-services의 `docs/auth.md`
+- 다음: Gateway·알림. 남은 메모리 예산 472MiB라 Spring 서비스 2대씩은 못 올린다 (docs/memory-plan.md의 판단). Secret 저장 암호화·NetworkPolicy는 Vault 단계에서
