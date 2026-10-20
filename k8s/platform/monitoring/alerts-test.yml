@@ -1,0 +1,61 @@
+# 알림 규칙 단위 테스트 (vmalert-tool unittest). 가짜 지표를 넣고 정해진 시각에 알림이 울리는지 본다.
+# 실행: scripts/test-alerts.sh   (kustomization에 넣지 않는다: 클러스터에는 올라가지 않는 파일)
+rule_files:
+  - alerts.yml
+evaluation_interval: 30s
+
+tests:
+  # 노드가 꺼짐: up이 1 → 0이 되고 1분(for) 지나면 울린다
+  - interval: 30s
+    input_series:
+      - series: 'up{job="node-exporter", node="worker1"}'
+        values: "1 1 0 0 0 0 0 0"
+    alert_rule_test:
+      - groupname: platform
+        eval_time: 1m
+        alertname: NodeDown
+        exp_alerts: []
+      - groupname: platform
+        eval_time: 3m
+        alertname: NodeDown
+        exp_alerts:
+          - exp_labels: { alertgroup: platform, job: node-exporter, node: worker1, severity: critical }
+            exp_annotations:
+              summary: "노드 worker1 응답 없음"
+              description: "node-exporter에 1분 넘게 접속하지 못했다. multipass list, ssh worker1"
+
+  # 컨테이너 재시작: 재시작 수가 0 → 1
+  - interval: 30s
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="apps", pod="coupon-x", container="coupon"}'
+        values: "0 0 1 1 1"
+    alert_rule_test:
+      - groupname: platform
+        eval_time: 2m
+        alertname: PodRestarted
+        exp_alerts:
+          - exp_labels: { alertgroup: platform, namespace: apps, pod: coupon-x, container: coupon, severity: warning }
+            exp_annotations:
+              summary: "apps/coupon-x (coupon) 재시작"
+              description: "최근 10분 안에 재시작했다. kubectl -n apps describe pod coupon-x 의 Last State를 본다"
+
+  # 컨테이너 메모리: RSS 90% (limit 100, rss 90) 5분 넘게 → 울림. 80%는 울리지 않음
+  - interval: 1m
+    input_series:
+      - series: 'container_memory_rss{namespace="apps", pod="a", container="c"}'
+        values: "90x10"
+      - series: 'container_spec_memory_limit_bytes{namespace="apps", pod="a", container="c"}'
+        values: "100x10"
+      - series: 'container_memory_rss{namespace="apps", pod="b", container="c"}'
+        values: "80x10"
+      - series: 'container_spec_memory_limit_bytes{namespace="apps", pod="b", container="c"}'
+        values: "100x10"
+    alert_rule_test:
+      - groupname: platform
+        eval_time: 7m
+        alertname: ContainerMemoryHigh
+        exp_alerts:
+          - exp_labels: { alertgroup: platform, namespace: apps, pod: a, container: c, severity: warning }
+            exp_annotations:
+              summary: "apps/a (c) 메모리 90%"
+              description: "limit의 85%를 5분 넘게 넘었다. 계속 오르면 OOMKilled. 근거와 예산: docs/memory-plan.md"

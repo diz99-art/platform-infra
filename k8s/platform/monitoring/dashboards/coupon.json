@@ -396,7 +396,7 @@
       "type": "prometheus",
       "uid": "vm"
      },
-     "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"apps\", container=\"coupon\"}) - sum by (pod) (jvm_memory_committed_bytes{job=\"coupon\"})",
+     "expr": "clamp_min(sum by (pod) (container_memory_working_set_bytes{namespace=\"apps\", container=\"coupon\"}) - sum by (pod) (jvm_memory_committed_bytes{job=\"coupon\"}), 0)",
      "legendFormat": "JVM이 모르는 네이티브 {{pod}}"
     },
     {

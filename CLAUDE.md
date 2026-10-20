@@ -41,7 +41,10 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림·파일 서버를 운영�
 - 배치: MySQL은 worker1(`[mysql]`), Redis·Kafka는 worker2(`[queue]`), 앱은 스케줄러가 나눔. 모든 파드에 `enableServiceLinks: false`.
 - 이미지 태그는 커밋 해시만 쓴다 (latest 금지). Java 앱은 메모리 requests = limits, CPU limit 없음, 실측해서 limit을 정한다.
 - MySQL 계정 연결 상한 = (replicas + maxSurge) × 커넥션 풀 + 여유 (`mysql_service_max_connections_overrides`).
-- 메모리 계획은 `docs/memory-plan.md`. 새 구성요소를 넣을 때 이 문서의 예산을 먼저 확인하고, 올린 뒤 실측해서 고친다 (워커 여유 목표 15%, limit 합 기준 지금 5%: 다음 서비스부터 실측으로 limit을 정한다).
+- limit은 실측 최대치(`memory.peak`, VictoriaMetrics의 max_over_time)를 근거로 정한다. 측정 조건이 실제 사용 조건을 대표하는지 먼저 확인한다 (repo-server: Kustomize만 렌더링할 때 값으로 줄였다가 Helm 렌더링에서 OOMKilled).
+- 메모리 위험은 RSS / limit으로 본다 (working set은 파일 캐시 포함).
+- 시험 스크립트에서 `git commit -a`를 쓸 때는 작업 트리가 깨끗한지 먼저 확인한다.
+- 메모리 계획은 `docs/memory-plan.md`. 새 구성요소를 넣을 때 이 문서의 예산을 먼저 확인하고, 올린 뒤 실측해서 고친다 (워커 여유 목표 15%, 전체 계획 limit 합 기준 지금 7%).
 - VM 크기 바꾸기: 한 대씩 `kubectl drain` → `multipass stop` → `multipass set local.<이름>.memory=…` → start → `kubectl uncordon`, `multipass/vms.conf`도 고친다.
 
 ## 명령어
@@ -62,6 +65,10 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림·파일 서버를 운영�
 - 앱 배포는 GitOps: coupon-system에 push → Actions(test → image → deploy)가 `k8s/apps/coupon/kustomization.yaml`의 newTag를 바꿔 push → ArgoCD가 동기화. 사람이 newTag를 고치거나 kubectl apply로 앱을 바꾸지 않는다 (selfHeal이 되돌린다)
 - 롤백: platform-infra에서 봇의 태그 커밋을 `git revert` 후 push. 지금 Git 확인: `kubectl -n platform annotate application coupon argocd.argoproj.io/refresh=normal --overwrite`
 - CI(github-actions[bot])가 platform-infra main에 커밋한다 → 작업 전에 `git pull --rebase`
+- 모니터링: Grafana http://192.168.252.2/grafana/ , Alertmanager /alertmanager/. 구성요소는 ArgoCD(`k8s/platform/monitoring`, Helm 앱 3개), Secret·Traefik 설정은 `ansible-playbook monitoring.yml`
+- 대시보드 수정: `k8s/platform/monitoring/dashboards/gen_dashboards.py` 고치고 실행 → JSON까지 커밋. 알림 규칙 수정 뒤 `scripts/test-alerts.sh`
+- vault 값 넣기(화면에 안 보이게): `scripts/set-vault-secret.sh <키>` (예: vault_discord_webhook_url)
+- 오래 걸리는 시험 전에는 맥이 잠들지 않게 `caffeinate -is -t 7200`. 맥이 잠들면 VM이 멈춘다 (chrony가 깨어난 뒤 시계를 맞춘다)
 - kubectl: kubeconfig는 `~/.kube/platform-infra.yaml`, 컨텍스트 `platform-infra` (~/.zshrc의 KUBECONFIG에 등록)
 
 ## 진행 단계
@@ -71,4 +78,5 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림·파일 서버를 운영�
 - 3단계: MySQL 8.4.11 (완료). 설계는 `docs/mysql.md`, 검증·복구 훈련 기록은 `docs/mysql-verification.md`
 - 4단계: Redis·Kafka, 쿠폰 서버 이전 (완료). `docs/redis-kafka.md`, `docs/coupon.md`
 - 5단계: ArgoCD GitOps (완료). `docs/gitops.md`
-- 다음: 플랫폼 서비스(Gateway·인증·알림·파일), 모니터링. Secret 저장 암호화·NetworkPolicy는 Vault 단계에서
+- 6단계: 모니터링·알림, 메모리 조정, 끊김 조사 (완료). `docs/monitoring.md`, `docs/memory-plan.md`
+- 다음: 플랫폼 서비스(Gateway·인증·알림·파일). 메모리 limit 합 여유 7%라 각 서비스는 실측으로 384Mi 안을 목표로. Secret 저장 암호화·NetworkPolicy는 Vault 단계에서

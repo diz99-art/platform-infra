@@ -123,7 +123,8 @@ c.panel("컨테이너 메모리 = 힙 + 힙 밖 + 네이티브",
         [(f'sum by (pod) ({WS}{{namespace="apps", container="coupon"}})', '컨테이너 {{pod}}'),
          ('sum by (pod) (jvm_memory_committed_bytes{job="coupon", area="heap"})', '힙 확보 {{pod}}'),
          ('sum by (pod) (jvm_memory_committed_bytes{job="coupon", area="nonheap"})', '힙 밖 확보 {{pod}}'),
-         (f'sum by (pod) ({WS}{{namespace="apps", container="coupon"}}) - sum by (pod) (jvm_memory_committed_bytes{{job="coupon"}})', 'JVM이 모르는 네이티브 {{pod}}'),
+         # 파드가 막 바뀔 때 두 지표의 수집 시각이 어긋나 음수가 나올 수 있어 0 아래는 자른다
+         (f'clamp_min(sum by (pod) ({WS}{{namespace="apps", container="coupon"}}) - sum by (pod) (jvm_memory_committed_bytes{{job="coupon"}}), 0)', 'JVM이 모르는 네이티브 {{pod}}'),
          (f'max({LIM}{{namespace="apps", container="coupon"}})', 'limit')],
         unit="bytes", w=24, h=10,
         description="네이티브 = 스레드 스택, GC 자료구조, JIT 컴파일러, malloc. 6단계 실측: 힙 밖 약 186MB, 네이티브 약 100MB로 일정하고 차이는 힙 확보량에서 났다")

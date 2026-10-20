@@ -48,7 +48,8 @@
 - [x] 3단계: MySQL (Vault 비밀 관리, StatefulSet, 서비스별 DB·계정, 백업·복구)
 - [x] 4단계: Redis·Kafka, 쿠폰 서버 이전 (GitHub Actions ARM64 이미지 → GHCR → k3s)
 - [x] 5단계: ArgoCD GitOps (push → 자동 배포, self-heal, Git 롤백)
-- [ ] 이후: 플랫폼 서비스(Gateway·인증·알림·파일), 모니터링, Vault 단계(Secret 저장 암호화, NetworkPolicy)
+- [x] 6단계: 메모리 여유 확보, 모니터링(VictoriaMetrics·Grafana)과 알림, 응답 끊김 조사
+- [ ] 이후: 플랫폼 서비스(Gateway·인증·알림·파일), Vault 단계(Secret 저장 암호화, NetworkPolicy)
 
 ## 1단계: VM과 Ansible 준비
 
@@ -379,3 +380,74 @@ ansible-playbook argocd.yml          # 이 뒤로 쿠폰 서버는 ArgoCD가 Git
 - **ArgoCD가 넘겨받은 뒤 옛 ConfigMap이 남음**: Ansible이 만든 `coupon-config`는 ArgoCD가 만든 게 아니라 prune 대상이 아니다 → 직접 삭제
 - **로컬 platform-infra가 원격보다 뒤처짐**: CI 봇이 main에 커밋한다. 작업 전 `git pull --rebase`
 - **zsh에서 `custom-columns=...[0]...`가 `no matches found`**: zsh가 `[0]`을 파일 이름 패턴으로 본다 → 인자를 따옴표로 감싼다
+
+## 6단계: 모니터링
+
+### 한 일
+
+1. 메모리: 실측 근거로 MySQL·Kafka 768 → 640, Redis 192 → 160. ArgoCD는 Helm 렌더링 때문에 오히려 704 → 768. 쿠폰 서버 516→555Mi 원인 분석
+2. 모니터링을 ArgoCD로 배포: VictoriaMetrics(수집+저장) + Grafana + vmalert + Alertmanager + kube-state-metrics + node-exporter + MySQL·Redis·Kafka exporter
+3. 대시보드 2개를 Git에 (생성 스크립트 + JSON), 알림 규칙 6개 + 단위 테스트, 디스코드 웹훅 준비
+4. Traefik 접근 로그를 켜고 응답 끊김 원인 범위를 좁힘
+5. 맥 절전으로 VM 시계가 51분 늦어진 문제를 찾아 chrony로 고침
+
+### 대시보드
+
+`http://192.168.252.2/grafana/` (보기는 로그인 없이). 맥이 잠든 구간이 빈칸으로 보인다.
+
+![플랫폼 개요](docs/images/grafana-platform-overview.png)
+
+![쿠폰 서버](docs/images/grafana-coupon.png)
+
+### 구조
+
+```
+cAdvisor·node-exporter·kube-state-metrics·쿠폰 서버(Actuator)·Traefik·exporter 3개
+        │ 30초마다 scrape
+        ▼
+VictoriaMetrics (platform, 15일 보관) ──▶ Grafana (/grafana, 대시보드는 Git의 JSON)
+        │
+        ▼
+vmalert (규칙 6개) ──▶ Alertmanager (/alertmanager) ──▶ 디스코드 웹훅 (vault)
+
+ArgoCD: k8s/platform/monitoring (Kustomize) + grafana·kube-state-metrics·node-exporter (Helm), AppProject platform
+Ansible: monitoring.yml = Secret 4개(Grafana 관리자, Alertmanager 설정, exporter 2개) + Traefik 접근 로그
+```
+
+### 설계 결정 (자세한 이유: [docs/monitoring.md](docs/monitoring.md), [docs/memory-plan.md](docs/memory-plan.md))
+
+- **VictoriaMetrics 단일 실행**: Prometheus와 같은 설정·PromQL에 메모리는 적게. 수집까지 직접 해서 vmagent 없음 (실측 115Mi)
+- **exporter는 별도 Deployment**: MySQL·Redis·Kafka를 재시작하지 않는다
+- **대시보드는 Git의 JSON, sidecar 없이 ConfigMap 직접 마운트**: 화면에서 고친 건 저장되지 않는다. 고치려면 `gen_dashboards.py`
+- **메모리 알림은 RSS / limit**: working set은 파일 캐시까지 세서 Grafana가 늘 95%로 보였다
+- **AppProject platform**: platform 네임스페이스만, ClusterRole만 클러스터 범위, Secret 금지
+- **chrony**: VM이 멈췄다 깨어나도 1~2분 안에 시계를 맞춘다
+
+### 검증 결과
+
+- 수집 대상 16개 모두 up, 시계열 약 9,800개. 앱 6개 Synced·Healthy
+- 알림: DLT에 시험 메시지 → 71초 뒤 `KafkaDeadLetter` → Alertmanager. 단위 테스트(노드 다운, 재시작, 메모리) 통과
+- 응답 끊김: 배포와 무관, 409(chunked) 응답에서만, **맥이 클라이언트일 때만**(클러스터 안·VM에서는 수십만 건 중 0건). Tomcat keep-alive 가설은 A/B 시험으로 기각. 서버는 처리를 마쳐 데이터 문제 없음
+
+### 메모리 여유율
+
+- 지금 떠 있는 것: limit 합 5200 / 7802MB (여유 33%), 실측 최대 3926
+- 전체 계획(플랫폼 서비스 4개 포함): limit 합 7248 → **여유 7%, 목표 15%에 못 미침**. 실측 기반 27%
+- 15%를 위해: 플랫폼 서비스를 실측해 384Mi 안에 맞추기 + ArgoCD Helm 차트를 OCI로 받아 repo-server 192로 → 6608 (15.3%)
+- 쿠폰 서버 555Mi는 누수가 아니라 SerialGC가 힙을 최대 가까이 확보해 두는 것 (힙 밖 186·네이티브 100은 일정)
+
+### 디스코드 알림 (직접 할 일)
+
+1. 디스코드 채널 편집 → 연동 → 웹후크 → 새 웹후크 → URL 복사
+2. 맥 터미널에서: `scripts/set-vault-secret.sh vault_discord_webhook_url` (입력이 보이지 않음)
+3. `cd ansible && ansible-playbook monitoring.yml`
+4. 시험 알림 명령은 [docs/monitoring.md](docs/monitoring.md#디스코드-웹훅-설정-직접-할-일)
+
+### 트러블슈팅 (실제로 겪은 것)
+
+- **repo-server OOMKilled**: Helm 차트 렌더링은 Kustomize보다 훨씬 많이 쓴다 → 동시 렌더링 1개 + 320Mi
+- **Grafana OOMKilled (192Mi)**: Grafana 13 시작 시 DB 초기화 → 320Mi
+- **VictoriaMetrics CrashLoop**: 플래그 이름 오타. StatefulSet은 고장 난 파드를 새 정의로 바꾸지 않아 직접 삭제
+- **PodRestarted 알림의 pod가 kube-state-metrics로 찍힘**: `honor_labels: true`
+- **모든 발급이 409 `COUPON_NOT_IN_ISSUE_PERIOD`**: VM 시계가 맥 절전으로 51분 늦음 → chrony
+- **시험 스크립트의 `git commit -a`가 다른 수정까지 커밋**: 작업 트리가 깨끗할 때만 돌게 고침
