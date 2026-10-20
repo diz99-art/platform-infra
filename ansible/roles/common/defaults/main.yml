@@ -2,6 +2,11 @@
 
 common_timezone: Asia/Seoul
 
+# 시간 동기화: chrony (systemd-timesyncd 대신, 6단계)
+# 맥이 잠들면 VM도 멈췄다가 깨어나는데, 그동안 VM 시계가 51분 늦어졌다. timesyncd는 다음 확인까지 최대 34분을 기다려서 바로 고쳐지지 않았다
+# chrony: 64초마다 확인(maxpoll 6 = 2^6초), 1초 넘게 어긋나면 언제든 바로 맞춤(makestep 1 -1)
+common_ntp_servers: [ntp.ubuntu.com, time.apple.com]
+
 common_packages:
   - curl
   - ca-certificates

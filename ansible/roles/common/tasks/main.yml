@@ -28,6 +28,24 @@
     reboot_timeout: 300
   when: common_reboot_if_required and common_reboot_flag.stat.exists
 
+- name: 시간 동기화 chrony 설치 (systemd-timesyncd는 자동으로 꺼진다)
+  ansible.builtin.apt:
+    name: chrony
+    state: present
+
+- name: chrony 설정
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: /etc/chrony/chrony.conf
+    mode: "0644"
+  notify: restart chrony
+
+- name: chrony 켜기
+  ansible.builtin.systemd:
+    name: chrony
+    state: started
+    enabled: true
+
 - name: 시간대 설정
   community.general.timezone:
     name: "{{ common_timezone }}"
