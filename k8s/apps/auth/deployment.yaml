@@ -43,6 +43,9 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
+        # 마운트한 Secret 파일의 그룹을 101(이미지의 app 그룹)로 맞춘다 → 아래 defaultMode 0440으로 이 앱만 키를 읽는다
+        # (0400만 주면 파일 주인이 root라 uid 100인 앱이 읽지 못해 시작에 실패했다)
+        fsGroup: 101
       containers:
         - name: auth
           # 태그는 kustomization.yaml의 images가 붙인다 (커밋 해시)
@@ -112,4 +115,4 @@ spec:
         - name: jwt-keys
           secret:
             secretName: auth-jwt-keys
-            defaultMode: 0400
+            defaultMode: 0440
