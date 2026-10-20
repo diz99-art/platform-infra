@@ -12,3 +12,4 @@ kubeconfig*
 
 # 맥
 .DS_Store
+__pycache__/
