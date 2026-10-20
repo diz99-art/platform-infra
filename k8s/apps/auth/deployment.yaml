@@ -27,8 +27,6 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8081"
         prometheus.io/path: /actuator/prometheus
-        # 배포 중 부하 시험용으로 파드 템플릿만 바꾼다 (7단계). 값을 바꾸면 롤링 업데이트가 일어난다
-        platform-infra/rollout-drill: "1"
     spec:
       # 2대를 서로 다른 노드에 둔다. 노드 하나가 죽어도 1대는 살아 있게.
       # ScheduleAnyway: 노드가 하나뿐인 상황(점검 중)에도 일단 띄운다 (DoNotSchedule이면 Pending으로 남는다)
@@ -77,13 +75,15 @@ spec:
               valueFrom: { secretKeyRef: { name: auth-admin, key: email } }
             - name: AUTH_ADMIN_PASSWORD
               valueFrom: { secretKeyRef: { name: auth-admin, key: password } }
+          # 실측(7단계, 로그인·발급 부하): RSS 최대 354MiB = 힙 확보 88(사용 최대 75) + 힙 밖 183(Metaspace 122) + 네이티브 약 83, 스레드 40
+          # 힙 160MB 고정 → 최대치 = 160 + 195 + 90 ≈ 445MiB → 512의 87% (docs/memory-plan.md)
           resources:
             requests:
               cpu: 200m
-              memory: 640Mi
+              memory: 512Mi
             # CPU limit 없음: JVM은 시작할 때 CPU를 많이 쓴다. limit이 있으면 시작이 몇 배 느려진다
             limits:
-              memory: 640Mi
+              memory: 512Mi
           # Actuator 헬스 체크 (관리 포트 8081, Service로는 열지 않음)
           # 시작(스프링 컨텍스트 + DB·Redis 연결)이 끝날 때까지 최대 3분 기다린다
           startupProbe:
