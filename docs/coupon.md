@@ -26,7 +26,8 @@ platform-infra (맥)
 - **ARM64 러너에서 바로 빌드**: k3s 노드(맥 M2 위 VM)가 ARM64다. x86 러너에서 QEMU로 ARM을 흉내 내면 Gradle 빌드가 몇 배 느려진다. public 저장소는 ARM 러너도 무료다.
 - 로그인은 `GITHUB_TOKEN`: 실행할 때마다 GitHub가 발급하고 끝나면 사라지는 토큰. 권한은 job에 `packages: write`만 준다. 저장해 둔 비밀번호가 없다.
 - `docker/metadata-action`이 OCI 라벨(`org.opencontainers.image.source`, `revision` 등)을 붙인다 → 이미지만 보고도 어느 저장소·커밋에서 왔는지 안다. 이 라벨로 패키지가 저장소에 연결되어 public 저장소의 패키지가 public이 됐다 (익명 pull HTTP 200 확인) → 클러스터에 pull secret이 필요 없다.
-- 빌드 캐시: `cache-from/to: type=gha` → 의존성이 그대로면 Gradle 다운로드 층을 다시 쓴다.
+- 빌드 캐시: `cache-from/to: type=gha` → 의존성이 그대로면 Gradle 다운로드 층을 다시 쓴다. 실측: 첫 빌드 2분 2초 → 캐시가 있는 두 번째 빌드(README만 바뀐 커밋 `8983373`) 25초.
+  README만 바뀌어도 이미지는 새로 만들어지지만, 클러스터는 `coupon_image_tag`를 바꿔 배포하기 전까지 기존 이미지를 쓴다.
 
 ### 태그를 커밋 해시로 붙이는 이유
 
