@@ -1,0 +1,20 @@
+# 인증 서버 Application. Git의 k8s/apps/auth = 클러스터 apps 네임스페이스의 인증 서버
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: auth
+  namespace: platform
+spec:
+  project: apps
+  source:
+    repoURL: https://github.com/diz99-art/platform-infra.git
+    targetRevision: main
+    path: k8s/apps/auth
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: apps
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+  revisionHistoryLimit: 10
