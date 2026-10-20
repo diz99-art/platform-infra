@@ -1,0 +1,35 @@
+#cloud-config
+# VM이 처음 켜질 때 딱 한 번 실행되는 초기 설정.
+# __SSH_PUBLIC_KEY__ 는 create-vms.sh가 실제 공개키로 바꿔서 넘긴다.
+# (공개키는 비밀이 아니지만, 사람마다 다르므로 파일에 직접 적지 않는다)
+
+# 기본 사용자(ubuntu)에게 맥의 공개키를 등록 → 비밀번호 없이 ssh 접속
+ssh_authorized_keys:
+  - __SSH_PUBLIC_KEY__
+
+# 비밀번호 로그인은 막는다. 키를 가진 사람만 들어올 수 있다.
+ssh_pwauth: false
+
+# /etc/hosts는 update-hosts.sh가 관리한다. cloud-init이 재부팅 때마다 덮어쓰지 않게 한다.
+manage_etc_hosts: false
+
+timezone: Asia/Seoul
+
+# apt update만 하고 전체 업그레이드는 하지 않는다 (VM 생성 시간을 줄이기 위해).
+package_update: true
+package_upgrade: false
+packages:
+  - curl             # HTTP 요청, 설치 스크립트 내려받기
+  - vim              # 편집기
+  - htop             # 메모리·CPU 사용량 보기
+  - jq               # JSON 보기 (kubectl 출력 가공에 자주 씀)
+  - dnsutils         # dig, nslookup (DNS 확인)
+  - net-tools        # netstat, ifconfig (옛 명령이지만 자료에 자주 나옴)
+  - iputils-ping     # ping
+  - traceroute       # 패킷이 거치는 경로 보기
+  - python3          # Ansible이 VM 안에서 모듈을 실행할 때 필요
+
+# 쿠버네티스는 스왑을 끄는 것을 권장한다. Ubuntu 클라우드 이미지는 원래 스왑이 없지만 확실히 해둔다.
+runcmd:
+  - swapoff -a
+  - sed -i '/\sswap\s/d' /etc/fstab

@@ -1,0 +1,7 @@
+# 비밀 값 (2단계 이후 MySQL 비밀번호 등)
+.env
+*.secret.yaml
+kubeconfig*
+
+# 맥
+.DS_Store
