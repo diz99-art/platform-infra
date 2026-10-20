@@ -554,8 +554,8 @@
   },
   {
    "type": "timeseries",
-   "title": "GC 멈춤 (초당 멈춘 시간)",
-   "description": "",
+   "title": "힙 사용률 (5분 평균)",
+   "description": "힙 사용량 ÷ 최대 힙. GC 직전에 늘 차는 톱니 모양이라 5분 평균으로 본다. 85% 넘게 10분이면 JvmHeapHigh 알림",
    "id": 12,
    "datasource": {
     "type": "prometheus",
@@ -564,6 +564,78 @@
    "gridPos": {
     "x": 16,
     "y": 28,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "stacking": {
+       "mode": "none"
+      },
+      "thresholdsStyle": {
+       "mode": "dashed"
+      }
+     },
+     "max": 1,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 0.85
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "avg_over_time((sum by (pod) (jvm_memory_used_bytes{job=\"coupon\", area=\"heap\"}) / sum by (pod) (jvm_memory_max_bytes{job=\"coupon\", area=\"heap\"} > 0))[5m:30s])",
+     "legendFormat": "{{pod}}"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "lastNotNull",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "GC 멈춤 (초당 멈춘 시간)",
+   "description": "",
+   "id": 13,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 36,
     "w": 8,
     "h": 8
    },
@@ -610,11 +682,11 @@
   {
    "type": "row",
    "title": "Traefik (앞단)",
-   "id": 13,
+   "id": 14,
    "collapsed": false,
    "gridPos": {
     "x": 0,
-    "y": 36,
+    "y": 44,
     "w": 24,
     "h": 1
    },
@@ -624,14 +696,14 @@
    "type": "timeseries",
    "title": "Traefik → 쿠폰 서버 응답 코드 (초당)",
    "description": "502/504/499가 보이면 배포 중 끊김을 의심한다 (docs/monitoring.md)",
-   "id": 14,
+   "id": 15,
    "datasource": {
     "type": "prometheus",
     "uid": "vm"
    },
    "gridPos": {
     "x": 0,
-    "y": 37,
+    "y": 45,
     "w": 12,
     "h": 8
    },
@@ -679,14 +751,14 @@
    "type": "timeseries",
    "title": "Traefik 열린 연결",
    "description": "",
-   "id": 15,
+   "id": 16,
    "datasource": {
     "type": "prometheus",
     "uid": "vm"
    },
    "gridPos": {
     "x": 12,
-    "y": 37,
+    "y": 45,
     "w": 12,
     "h": 8
    },

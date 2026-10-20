@@ -52,8 +52,8 @@ spec:
   description: 플랫폼 구성요소 (모니터링, platform 네임스페이스)
   sourceRepos:
     - {{ argocd_repo_url }}
-{% for repo in argocd_platform_helm_repos %}
-    - {{ repo }}
+{% for repo in argocd_oci_helm_repos %}
+    - {{ repo.url }}
 {% endfor %}
   destinations:
     - server: https://kubernetes.default.svc

@@ -3,21 +3,58 @@
 groups:
   - name: platform
     rules:
-      # 컨테이너 메모리 85% 초과: 계속 오르면 OOMKilled.
+      # 컨테이너 메모리 85% 초과 (Java 앱이 아닌 컨테이너): 계속 오르면 OOMKilled.
       # RSS(익명 메모리) 기준: working set은 실행 파일을 읽어 둔 파일 캐시까지 포함해서, 커널이 OOM 전에 돌려받을 수 있는 메모리도 센다
       # (Grafana: working set 305Mi 중 캐시 100Mi → working set 기준이면 늘 95%로 울린다. RSS는 211Mi = 66%)
+      # Java 앱 = JVM 지표(jvm_memory_max_bytes)를 내보내는 파드 (Spring 앱). Kafka도 JVM이지만 JVM 지표를 내보내지 않아 여기(85%)에 속한다
       - alert: ContainerMemoryHigh
         expr: |
-          max by (namespace, pod, container) (container_memory_rss)
-            / on (namespace, pod, container)
-          max by (namespace, pod, container) (container_spec_memory_limit_bytes > 0)
-          > 0.85
+          (
+            max by (namespace, pod, container) (container_memory_rss)
+              / on (namespace, pod, container)
+            max by (namespace, pod, container) (container_spec_memory_limit_bytes > 0)
+          ) > 0.85
+          unless on (namespace, pod) group by (namespace, pod) (jvm_memory_max_bytes)
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "{{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) 메모리 {{ $value | humanizePercentage }}"
           description: "limit의 85%를 5분 넘게 넘었다. 계속 오르면 OOMKilled. 근거와 예산: docs/memory-plan.md"
+
+      # Java 앱의 컨테이너 메모리 90% 초과: JVM은 최대 힙을 미리 확보해 두고 잘 돌려주지 않아 평소에도 85% 근처에 머문다 (쿠폰 서버 RSS 85~89%)
+      # 힙 상한이 정해져 있어 여기서 더 오르는 것은 힙 밖·네이티브 메모리가 늘어난다는 뜻 → 90%로 본다
+      - alert: JavaContainerMemoryHigh
+        expr: |
+          (
+            max by (namespace, pod, container) (container_memory_rss)
+              / on (namespace, pod, container)
+            max by (namespace, pod, container) (container_spec_memory_limit_bytes > 0)
+          ) > 0.90
+          and on (namespace, pod) group by (namespace, pod) (jvm_memory_max_bytes)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }} (Java) 메모리 {{ $value | humanizePercentage }}"
+          description: "limit의 90%를 5분 넘게 넘었다. 힙은 상한이 있으니 힙 밖(Metaspace)·네이티브(스레드 등)가 느는지 쿠폰 서버 대시보드의 JVM 메모리 패널을 본다"
+
+      # 힙 사용률 = 힙 사용량 ÷ 최대 힙. GC 직전에는 늘 최대 근처까지 차므로(톱니 모양) 5분 평균으로 본다.
+      # 평균이 85%를 10분 넘게 넘으면 살아 있는 객체가 힙을 거의 채운 것 → GC가 잦아지고 곧 OutOfMemoryError (ExitOnOutOfMemoryError로 재시작)
+      - alert: JvmHeapHigh
+        expr: |
+          avg_over_time(
+            (
+              sum by (namespace, pod) (jvm_memory_used_bytes{area="heap"})
+                / sum by (namespace, pod) (jvm_memory_max_bytes{area="heap"} > 0)
+            )[5m:30s]
+          ) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }} 힙 사용률 {{ $value | humanizePercentage }} (5분 평균)"
+          description: "살아 있는 객체가 힙을 거의 채웠다. GC 멈춤 시간이 늘고 OutOfMemoryError가 날 수 있다. 쿠폰 서버 대시보드의 힙·GC 패널을 본다"
 
       # 노드 메모리 85% 초과: 더 오르면 kubelet이 파드를 쫓아낸다(eviction)
       - alert: NodeMemoryHigh

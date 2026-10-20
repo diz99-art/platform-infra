@@ -134,6 +134,9 @@ c.panel("힙 사용·확보", [('sum by (pod) (jvm_memory_used_bytes{job="coupon
         unit="bytes", w=8)
 c.panel("힙 밖 (영역별 확보)", [('sum by (id) (jvm_memory_committed_bytes{job="coupon", area="nonheap"}) / count by (id) (jvm_memory_committed_bytes{job="coupon", area="nonheap"})', '{{id}}')],
         unit="bytes", w=8, stack=True)
+c.panel("힙 사용률 (5분 평균)", [('avg_over_time((sum by (pod) (jvm_memory_used_bytes{job="coupon", area="heap"}) / sum by (pod) (jvm_memory_max_bytes{job="coupon", area="heap"} > 0))[5m:30s])', '{{pod}}')],
+        unit="percentunit", w=8, max_=1, thresholds=[(0.85, "red")],
+        description="힙 사용량 ÷ 최대 힙. GC 직전에 늘 차는 톱니 모양이라 5분 평균으로 본다. 85% 넘게 10분이면 JvmHeapHigh 알림")
 c.panel("GC 멈춤 (초당 멈춘 시간)", [('sum by (pod, gc) (rate(jvm_gc_pause_seconds_sum{job="coupon"}[1m]))', '{{pod}} {{gc}}')],
         unit="s", w=8)
 c.row("Traefik (앞단)")

@@ -7,7 +7,8 @@ metadata:
 spec:
   project: platform
   source:
-    repoURL: https://grafana-community.github.io/helm-charts
+    # OCI 레지스트리 (차트 목록 전체를 받지 않는다. 저장소 등록은 ansible/roles/argocd)
+    repoURL: ghcr.io/grafana-community/helm-charts
     chart: grafana
     targetRevision: 14.0.1
     helm:

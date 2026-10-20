@@ -28,3 +28,24 @@
 - name: Ingress, AppProject, 루트 Application
   kubernetes.core.k8s:
     template: bootstrap.yaml.j2
+
+# ArgoCD는 Helm 차트를 OCI 레지스트리에서 받으려면 저장소를 등록해야 한다 (enableOCI).
+# 등록 정보는 Secret 형식이지만 비밀 값은 없다 (공개 레지스트리, 접속 정보 없음)
+- name: OCI Helm 저장소 등록
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "repo-oci-{{ item.name }}"
+        namespace: "{{ argocd_namespace }}"
+        labels:
+          argocd.argoproj.io/secret-type: repository
+      data:
+        name: "{{ (item.name ~ '-oci') | b64encode }}"
+        type: "{{ 'helm' | b64encode }}"
+        url: "{{ item.url | b64encode }}"
+        enableOCI: "{{ 'true' | b64encode }}"
+  loop: "{{ argocd_oci_helm_repos }}"
+  loop_control: { label: "{{ item.url }}" }

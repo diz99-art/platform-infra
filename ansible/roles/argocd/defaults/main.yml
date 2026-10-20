@@ -9,10 +9,12 @@ argocd_repo_url: https://github.com/diz99-art/platform-infra.git
 argocd_repo_revision: main
 # 루트 Application이 지켜보는 폴더. 여기에 Application YAML을 넣으면 그 앱이 배포된다 (app of apps)
 argocd_apps_path: k8s/argocd/apps
-# AppProject platform이 차트를 받아도 되는 Helm 저장소 (모니터링)
-argocd_platform_helm_repos:
-  - https://prometheus-community.github.io/helm-charts
-  - https://grafana-community.github.io/helm-charts
+# AppProject platform이 차트를 받아도 되는 Helm 저장소 (모니터링). OCI 레지스트리에서 받는다 (6단계)
+# HTTP Helm 저장소는 차트 전체 목록(index.yaml, 수십 MB)을 내려받아 해석해야 해서 repo-server가 Helm 렌더링 때 OOMKilled됐다.
+# OCI는 필요한 차트 한 버전만 받는다. 공개 레지스트리라 접속 정보는 없다
+argocd_oci_helm_repos:
+  - { name: prometheus-community, url: ghcr.io/prometheus-community/charts }
+  - { name: grafana-community, url: ghcr.io/grafana-community/helm-charts }
 
 # 맥 브라우저 주소: http://<노드 IP>/argocd
 argocd_root_path: /argocd

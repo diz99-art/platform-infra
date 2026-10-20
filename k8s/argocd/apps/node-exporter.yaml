@@ -7,7 +7,8 @@ metadata:
 spec:
   project: platform
   source:
-    repoURL: https://prometheus-community.github.io/helm-charts
+    # OCI 레지스트리 (차트 목록 전체를 받지 않는다. 저장소 등록은 ansible/roles/argocd)
+    repoURL: ghcr.io/prometheus-community/charts
     chart: prometheus-node-exporter
     targetRevision: 4.60.0
     helm:
