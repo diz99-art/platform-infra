@@ -27,7 +27,7 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8081"
         prometheus.io/path: /actuator/prometheus
-        platform-infra/rollout-drill: "8"
+        platform-infra/rollout-drill: "9"
     spec:
       # 2대를 서로 다른 노드에 둔다. 노드 하나가 죽어도 1대는 살아 있게.
       # ScheduleAnyway: 노드가 하나뿐인 상황(점검 중)에도 일단 띄운다 (DoNotSchedule이면 Pending으로 남는다)
