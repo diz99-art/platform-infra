@@ -1,0 +1,4 @@
+# 인증 서버에서 Ansible이 맡는 부분: Git에 둘 수 없는 Secret. 앱 자체는 ArgoCD가 Git(k8s/apps/auth)으로 배포한다.
+auth_namespace: apps
+# 시작할 때 이 관리자 계정이 없으면 만든다 (비밀번호는 vault의 vault_auth_admin_password)
+auth_admin_email: admin@platform.local

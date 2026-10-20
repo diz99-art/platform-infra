@@ -36,9 +36,10 @@ mysql_service_privileges: SELECT,INSERT,UPDATE,DELETE,CREATE,ALTER,INDEX,REFEREN
 mysql_service_max_connections: 25
 # 서비스별로 다르게 줄 때. 계산: (replicas + 롤링 업데이트 maxSurge) × 커넥션 풀 크기 + 여유
 #   coupon: (2 + 1) × 10 + 5 = 35 (풀 크기는 k8s/apps/coupon/config.env). 25로 두었더니 배포 중 3번째 파드가 연결 상한에 걸려 시작에 실패했다 (docs/coupon.md)
-# 합계는 max_connections(120) 안: 35 + 25 × 2(auth, notification) + 백업 2 + exporter 3 = 90
+# 합계는 max_connections(120) 안: coupon 35 + auth 35 + notification 25 + 백업 2 + exporter 3 = 100
 mysql_service_max_connections_overrides:
   coupon: 35
+  auth: 35        # 인증 서버도 replicas 2 + maxSurge 1, 풀 10 (7단계)
 # 백업 계정: 읽기와 덤프에 필요한 것만
 mysql_backup_user: backup
 mysql_backup_privileges: SELECT,SHOW VIEW,TRIGGER,LOCK TABLES,EVENT
@@ -46,7 +47,7 @@ mysql_backup_privileges: SELECT,SHOW VIEW,TRIGGER,LOCK TABLES,EVENT
 # 모니터링 계정 (mysqld_exporter, 6단계): 서버 상태만 본다. 서비스 데이터(coupon.* 등)는 읽을 수 없다
 mysql_exporter_user: exporter
 mysql_exporter_privileges: "*.*:PROCESS,REPLICATION CLIENT/performance_schema.*:SELECT"
-# 합계: 35 + 25 × 2 + 백업 2 + exporter 3 = 90 ≤ max_connections 120 (파일 서버를 빼서 25 줄었다)
+# 합계: coupon 35 + auth 35 + notification 25 + 백업 2 + exporter 3 = 100 ≤ max_connections 120
 mysql_exporter_max_connections: 3
 
 # true로 실행하면 vault의 새 비밀번호로 계정 비밀번호를 바꾼다 (-e mysql_rotate_passwords=true)

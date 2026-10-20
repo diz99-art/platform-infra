@@ -1,0 +1,25 @@
+# [맥에서] 인증 서버 Secret
+
+# 서명용 개인키. 파일 하나 = 키 하나, 파일 이름 = kid. 파드에는 /etc/auth/keys 폴더로 마운트된다
+# 키 교체 때 vault의 vault_auth_jwt_keys에 키를 추가하고 이 플레이북을 다시 실행한다 (platform-services의 docs/auth.md)
+- name: 서명 키 Secret (auth-jwt-keys)
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata: { name: auth-jwt-keys, namespace: "{{ auth_namespace }}" }
+      data: "{{ dict(auth_jwt_keys.keys() | map('regex_replace', '$', '.pem') | zip(auth_jwt_keys.values() | map('trim') | map('regex_replace', '$', '\n') | map('b64encode'))) }}"
+  no_log: true
+
+- name: 관리자 계정 Secret (auth-admin)
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata: { name: auth-admin, namespace: "{{ auth_namespace }}" }
+      data:
+        email: "{{ auth_admin_email | b64encode }}"
+        password: "{{ auth_admin_password | b64encode }}"
+  no_log: true

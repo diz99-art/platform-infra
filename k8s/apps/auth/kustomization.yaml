@@ -1,0 +1,21 @@
+# 인증 서버 매니페스트 (Kustomize). ArgoCD Application "auth"가 이 폴더를 apps 네임스페이스에 적용한다.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: apps
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - pdb.yaml
+  - ingress.yaml
+
+configMapGenerator:
+  - name: auth-config
+    envs:
+      - config.env
+
+# 이미지 태그 = platform-services의 커밋 해시. platform-services의 GitHub Actions가 이 줄을 바꿔 push한다
+images:
+  - name: ghcr.io/diz99-art/platform-services-auth
+    newTag: pending

@@ -1,0 +1,115 @@
+# 인증 서버 (platform-services의 auth 모듈). 사용자는 MySQL(auth DB), 리프레시 토큰·로그인 잠금은 Redis에 있어 서버 자체는 상태가 없다 → Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+  namespace: apps
+  labels:
+    app: auth
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: auth
+  # 새 버전으로 바꿀 때: 새 파드를 하나 먼저 띄우고(maxSurge 1) Ready가 되면 옛 파드를 하나 내린다 (maxUnavailable 0)
+  # → 배포 중에도 항상 2대가 요청을 받는다
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: auth
+      # VictoriaMetrics가 관리 포트의 Actuator 지표(JVM, HTTP, 인증 지표 auth_login_total 등)를 가져가게 표시 (k8s/platform/monitoring/scrape.yml의 pods)
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: /actuator/prometheus
+    spec:
+      # 2대를 서로 다른 노드에 둔다. 노드 하나가 죽어도 1대는 살아 있게.
+      # ScheduleAnyway: 노드가 하나뿐인 상황(점검 중)에도 일단 띄운다 (DoNotSchedule이면 Pending으로 남는다)
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: auth
+      enableServiceLinks: false
+      # preStop 10초 + Spring graceful shutdown(최대 30초) + 여유
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+      containers:
+        - name: auth
+          # 태그는 kustomization.yaml의 images가 붙인다 (커밋 해시)
+          image: ghcr.io/diz99-art/platform-services-auth
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: management
+              containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: auth-config
+          env:
+            # Secret은 Git에 없다. Ansible이 vault 값으로 만든다 (mysql.yml, redis.yml)
+            - name: DB_HOST
+              valueFrom: { secretKeyRef: { name: mysql-auth, key: host } }
+            - name: DB_NAME
+              valueFrom: { secretKeyRef: { name: mysql-auth, key: database } }
+            - name: DB_USERNAME
+              valueFrom: { secretKeyRef: { name: mysql-auth, key: username } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: mysql-auth, key: password } }
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: redis, key: password } }
+            # 첫 관리자 계정 (Ansible auth.yml이 vault로 만든 Secret)
+            - name: AUTH_ADMIN_EMAIL
+              valueFrom: { secretKeyRef: { name: auth-admin, key: email } }
+            - name: AUTH_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: auth-admin, key: password } }
+          resources:
+            requests:
+              cpu: 200m
+              memory: 640Mi
+            # CPU limit 없음: JVM은 시작할 때 CPU를 많이 쓴다. limit이 있으면 시작이 몇 배 느려진다
+            limits:
+              memory: 640Mi
+          # Actuator 헬스 체크 (관리 포트 8081, Service로는 열지 않음)
+          # 시작(스프링 컨텍스트 + DB·Redis 연결)이 끝날 때까지 최대 3분 기다린다
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: management }
+            periodSeconds: 5
+            failureThreshold: 36
+          # liveness: 앱 자체가 살아 있나. DB·Redis가 죽었다고 앱을 재시작해 봐야 소용없으므로 외부 의존성은 보지 않는다
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: management }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # readiness: 요청을 받을 준비가 됐나. 시작 중이거나 종료 중이면 Service에서 빠진다
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: management }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          lifecycle:
+            # 종료 신호 전에 10초 기다린다: 그 사이 Service·Traefik이 이 파드를 목록에서 빼서 새 요청이 오지 않게 된다
+            # (없으면 이미 종료 중인 파드로 요청이 가서 502가 난다)
+            preStop:
+              sleep:
+                seconds: 10
+          # 서명용 개인키: Secret auth-jwt-keys의 파일(<kid>.pem)이 이 폴더에 생긴다. 읽기 전용, 이 컨테이너만 읽는다
+          volumeMounts:
+            - name: jwt-keys
+              mountPath: /etc/auth/keys
+              readOnly: true
+      volumes:
+        - name: jwt-keys
+          secret:
+            secretName: auth-jwt-keys
+            defaultMode: 0400

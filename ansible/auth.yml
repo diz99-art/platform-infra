@@ -1,0 +1,13 @@
+# 인증 서버에서 Ansible이 맡는 부분 (Secret). 실행: cd ansible && ansible-playbook auth.yml  (멱등)
+# auth DB와 계정(mysql-auth Secret)은 mysql.yml이, Redis 접속 정보(redis Secret)는 redis.yml이 만든다
+# 순서: ... → argocd.yml → monitoring.yml → auth.yml
+
+- name: 인증 서버 Secret (맥에서 API 서버로)
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ kubeconfig_local_path }}"
+      context: "{{ kubeconfig_context }}"
+  roles:
+    - auth

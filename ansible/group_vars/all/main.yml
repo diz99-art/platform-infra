@@ -27,3 +27,5 @@ grafana_admin_password: "{{ vault_grafana_admin_password }}"
 mysql_exporter_password: "{{ vault_mysql_exporter_password }}"
 # 비어 있으면 알림을 보내지 않는다 (Alertmanager가 받기만 함). 넣는 법: scripts/set-vault-secret.sh vault_discord_webhook_url
 discord_webhook_url: "{{ vault_discord_webhook_url }}"
+auth_jwt_keys: "{{ vault_auth_jwt_keys }}"
+auth_admin_password: "{{ vault_auth_admin_password }}"
