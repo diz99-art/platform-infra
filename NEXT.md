@@ -4,7 +4,7 @@
 
 ## 지금 상태
 
-- 커밋: platform-infra `NEXT.md 커밋`(이 파일), platform-services `73e537a`, coupon-system `7ef9cac`. 세 저장소 모두 push 끝
+- 커밋: platform-infra `96c3418`(이 파일을 넣은 커밋), platform-services `73e537a`, coupon-system `7ef9cac`. 세 저장소 모두 push 끝
 - VM 3대(cp1, worker1, worker2)는 `multipass stop`으로 멈춰 두었다 (삭제하지 않았다. 데이터는 그대로)
 - 8단계에서 끝난 것
   - Gateway를 Traefik 미들웨어로 만듦: `k8s/apps/gateway/`(IngressRoute 하나에 /auth/*, /coupons/*), `ansible/roles/traefik/`
