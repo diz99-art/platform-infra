@@ -9,6 +9,8 @@ ansible/.vault-pass
 backups/
 *.secret.yaml
 kubeconfig*
+# 위 패턴의 예외: kubeconfig를 만드는 Ansible task 파일(비밀값 없음). 2단계부터 빠져 있었다
+!ansible/roles/k3s_server/tasks/kubeconfig.yml
 
 # 맥
 .DS_Store

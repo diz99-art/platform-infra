@@ -81,4 +81,5 @@ k3s 클러스터에서 쿠폰·인증·Gateway·알림 서버를 운영하는 �
 - 5단계: ArgoCD GitOps (완료). `docs/gitops.md`
 - 6단계: 모니터링·알림, 메모리 조정, 끊김 조사 (완료). `docs/monitoring.md`, `docs/memory-plan.md`
 - 7단계: 인증 서버(platform-services), 쿠폰 서버 JWT 검증 (완료). platform-services의 `docs/auth.md`
-- 다음: Gateway·알림. 남은 메모리 예산 472MiB라 Spring 서비스 2대씩은 못 올린다 (docs/memory-plan.md의 판단). Secret 저장 암호화·NetworkPolicy는 Vault 단계에서
+- 8단계: Gateway를 Traefik 미들웨어로 (진행 중, 2026-10-21 중단). `docs/gateway.md`, `docs/test-data.md`. **다시 시작할 때 `NEXT.md`부터 읽는다**
+- 다음: 알림. 남은 메모리 예산 472MiB라 Spring 서비스 2대씩은 못 올린다 (docs/memory-plan.md의 판단). Secret 저장 암호화·NetworkPolicy는 Vault 단계에서
